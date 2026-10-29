@@ -11,10 +11,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/MishkaGql/template/api"
-	"github.com/MishkaGql/template/internal/db"
+	"github.com/MishkaGql/template/internal/core/domain/trip"
+	"github.com/MishkaGql/template/internal/core/infra/db"
+	"github.com/MishkaGql/template/internal/core/infra/trip/entity"
+	"github.com/MishkaGql/template/internal/core/infra/trip/transformer"
 	"github.com/MishkaGql/template/internal/errs"
-	"github.com/MishkaGql/template/internal/repository/entity"
-	"github.com/MishkaGql/template/internal/repository/mapper"
 )
 
 type TripRepository struct {
@@ -29,76 +30,58 @@ func NewRepository(pool *pgxpool.Pool, queryTimeout time.Duration) *TripReposito
 	}
 }
 
-func (r *TripRepository) SaveTripStatusHistory(
-	ctx context.Context,
-	id api.TripId,
-	from *api.TripStatus,
-	to api.TripStatus,
-	reason *string,
-) error {
-	querier := db.ExtractQuerier(ctx, r.pool)
-	
-	sql := `
-		INSERT INTO trip_status_history 
-		(trip_id, from_status, to_status, reason) 
-		VALUES 
-		(@trip_id, @from_status, @to_status, @reason)
-	`
-	args := pgx.NamedArgs{
-		"trip_id":     id,
-		"from_status": from,
-		"to_status":   to,
-		"reason":      reason,
-	}
-
-	timeoutCtx, cancel := context.WithTimeout(ctx, r.queryTimeout)
-	defer cancel()
-
-	_, err := querier.Exec(timeoutCtx, sql, args)
-	if err != nil {
-		return errs.NewInternalServiceError(err)
-	}
-
-	return nil
-}
-
-func (r *TripRepository) Create(ctx context.Context, trip api.Trip) (api.Trip, error) {
+func (r *TripRepository) Save(ctx context.Context, t trip.Trip) (trip.Trip, error) {
 	querier := db.ExtractQuerier(ctx, r.pool)
 
 	sql := `
-	  	INSERT INTO trips (
-		   id, user_id, driver_id,
-		   start_latitude, start_longitude,
-		   end_latitude, end_longitude,
-		   price, status, started_at
-		 ) VALUES (
-				@id, @user_id, @driver_id,
-				@start_latitude, @start_longitude,
-				@end_latitude, @end_longitude,
-				@price, @status, @started_at
-	   	)
-		RETURNING *
+ INSERT INTO trips (
+	   	id, user_id, driver_id,
+	    start_latitude, start_longitude,
+	    end_latitude, end_longitude,
+	    price, status, started_at
+	) VALUES (
+	    @id, @user_id, @driver_id,
+	    @start_latitude, @start_longitude,
+	    @end_latitude, @end_longitude,
+	    @price, @status, @started_at
+	)
+	ON CONFLICT (id) 
+	DO UPDATE SET
+	    user_id         = EXCLUDED.user_id,
+	    driver_id       = EXCLUDED.driver_id,
+	    start_latitude  = EXCLUDED.start_latitude,
+	    start_longitude = EXCLUDED.start_longitude,
+	    end_latitude    = EXCLUDED.end_longitude,
+	    end_longitude   = EXCLUDED.end_longitude,
+	    price           = EXCLUDED.price,
+	    status          = EXCLUDED.status,
+	    started_at      = EXCLUDED.started_at
+	WHERE 
+	    trips.status 	IS DISTINCT FROM EXCLUDED.status OR
+	    trips.price  	IS DISTINCT FROM EXCLUDED.price
+	RETURNING *;
   	`
-	args := pgx.StructArgs(mapper.ToEntity(trip))
+   
+	args := pgx.StructArgs(transformer.ToEntity(t))
 
 	timeoutCtx, cancel := context.WithTimeout(ctx, r.queryTimeout)
 	defer cancel()
 
 	row, err := querier.Query(timeoutCtx, sql, args)
 	if err != nil {
-		return api.Trip{}, errs.NewInternalServiceError(err)
+		return trip.Trip{}, errs.NewInternalServiceError(err)
 	}
 
 	tripEntity, err := pgx.CollectOneRow(row, pgx.RowToStructByName[entity.TripEntity])
 	if err != nil {
 		activeTripExistCode := "23505"
 		if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == activeTripExistCode {
-			return api.Trip{}, errs.NewServiceError(errs.DriverBusy, "Driver already has an active trip")
+			return trip.Trip{}, errs.NewServiceError(errs.DriverBusy, "Driver already has an active trip")
 		}
-		return api.Trip{}, errs.NewInternalServiceError(err)
+		return trip.Trip{}, errs.NewInternalServiceError(err)
 	}
 
-	return mapper.ToApi(tripEntity), nil
+	return transformer.ToDomain(tripEntity), nil
 }
 
 func (r *TripRepository) Get(ctx context.Context, tripId uuid.UUID) (api.Trip, error) {
@@ -123,7 +106,7 @@ func (r *TripRepository) Get(ctx context.Context, tripId uuid.UUID) (api.Trip, e
 		return api.Trip{}, errs.NewInternalServiceError(err)
 	}
 
-	return mapper.ToApi(tripEntity), nil
+	return transformer.ToDomain(tripEntity), nil
 }
 
 func (r *TripRepository) Finish(ctx context.Context, tripId uuid.UUID, finishedAt time.Time) (api.Trip, error) {
@@ -169,6 +152,7 @@ func (r *TripRepository) Finish(ctx context.Context, tripId uuid.UUID, finishedA
 	if err != nil {
 		return api.Trip{}, errs.NewInternalServiceError(err)
 	}
+
 
 	return mapper.ToApi(tripEntity), nil
 }

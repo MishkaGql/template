@@ -39,6 +39,7 @@ func SendError(w http.ResponseWriter, err error) {
 	if !errors.As(err, &serviceError) {
 		panic(fmt.Sprintf("Unexpected error type %T", err))
 	}
+	
 	problem := errs.ToProblem(serviceError)
 	
 	w.Header().Set("Content-Type", "application/problem+json")

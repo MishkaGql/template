@@ -119,6 +119,7 @@ func setupHandler(h *handler.TripHandler) http.Handler {
 
 	// валидирует всё по спеке
 	mw := nethttpmiddleware.OapiRequestValidatorWithOptions(spec, &nethttpmiddleware.Options{
+		Options: :,
 		ErrorHandler: func(w http.ResponseWriter, message string, statusCode int) {
 			handler.SendError(w, errs.ValidationServiceError)
 		},
