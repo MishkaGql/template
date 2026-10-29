@@ -1,0 +1,6 @@
+.gitignore
+.env.example
+.idea
+.tripgo
+README.MD
+Makefile
