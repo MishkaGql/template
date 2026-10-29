@@ -18,7 +18,7 @@ func NewDbPool(ctx context.Context, cfg config.DBConfig) (*pgxpool.Pool, error) 
 	poolCfg.MinConns = cfg.MinConns
 	poolCfg.ConnConfig.ConnectTimeout = cfg.ConnectTimeout
 	poolCfg.MaxConnLifetime = cfg.MaxConnLifetime
-	poolCfg.MaxConnLifetimeJitter = cfg.Jitter
+	poolCfg.MaxConnLifetimeJitter = cfg.ConnectionsJitter
 	poolCfg.PingTimeout = cfg.PingTimeout
 	poolCfg.HealthCheckPeriod = cfg.HealthCheckPeriod
 

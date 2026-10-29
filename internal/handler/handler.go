@@ -55,7 +55,6 @@ func (h *TripHandler) CreateTrip(
 
 // (GET /api/v1/trips/{tripId})
 func (h *TripHandler) GetTrip(w http.ResponseWriter, r *http.Request, tripId api.TripId) {
-
 	response, err := h.service.Get(r.Context(), tripId)
 	if err != nil {
 		SendError(w, err)

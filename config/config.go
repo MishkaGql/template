@@ -2,6 +2,8 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
+	"net/url"
 	"time"
 
 	"github.com/caarlos0/env/v11"
@@ -15,7 +17,7 @@ type DBConfig struct {
 	MaxConnLifetime   time.Duration `env:"DATABASE_MAX_CONN_LIFETIME" validate:"required,gt=0"`
 	ConnectTimeout    time.Duration `env:"DATABASE_CONNECT_TIMEOUT" validate:"required,gt=0"`
 	QueryTimeout      time.Duration `env:"DATABASE_QUERY_TIMEOUT" validate:"required,gt=0"`
-	Jitter            time.Duration `env:"DATABASE_CONNECTIONS_JITTER" validate:"required,gte=0"`
+	ConnectionsJitter time.Duration `env:"DATABASE_CONNECTIONS_JITTER" validate:"required,gte=0"`
 	PingTimeout       time.Duration `env:"DATABASE_PING_TIMEOUT" validate:"required,gte=0"`
 	HealthCheckPeriod time.Duration `env:"DATABASE_HEALTHCHECK_PERIOD" validate:"required,gt=0"`
 }
@@ -31,20 +33,38 @@ type HTTPConfig struct {
 type Config struct {
 	DB              DBConfig      `validate:"required"`
 	HTTP            HTTPConfig    `validate:"required"`
-	LogLevel        string        `env:"LOG_LEVEL" validate:"required,oneof=debug warn info error"`
 	ShutdownTimeout time.Duration `env:"SHUTDOWN_TIMEOUT" validate:"required,gt=0"`
+	LogLevel        string        `env:"LOG_LEVEL" validate:"required,oneof=debug warn info error"`
 }
 
 func MustLoad(validate *validator.Validate) *Config {
 	var cfg Config
-
+	
 	if err := env.Parse(&cfg); err != nil {
-		panic(fmt.Sprintf("parse config failed: %v ", err))
+		panic(fmt.Sprintf("config parsing error: %v ", err))
 	}
 
 	if err := validate.Struct(&cfg); err != nil {
-		panic(fmt.Sprintf("validate config failed: %v", err))
+		panic(fmt.Sprintf("config validation error: %v", err))
 	}
 
 	return &cfg
+}
+
+func getSafetyUrl(rawUrl string) string {
+	parsed, err := url.Parse(rawUrl)
+	if err != nil {
+		panic(fmt.Sprintf("url parse error: %v", err))
+	}
+	
+	return parsed.Redacted()
+}
+
+func(c *Config) LogValue() slog.Value {
+	return slog.GroupValue(
+        slog.String("Database url", getSafetyUrl(c.DB.URL)),
+        slog.String("Server addr",  c.HTTP.Addr),
+        slog.String("Log level",  c.LogLevel),
+        slog.String("Ping timeout",  c.DB.PingTimeout.String()),
+    )
 }

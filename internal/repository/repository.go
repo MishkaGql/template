@@ -156,9 +156,10 @@ func (r *TripRepository) Finish(ctx context.Context, tripId uuid.UUID, finishedA
 		UPDATE trips
 			SET status = @status,
 				finished_at = @finished_at
+		WHERE id = @trip_id
 		RETURNING *
 	`
-	args = pgx.NamedArgs{"status": api.Completed, "finished_at": finishedAt}
+	args = pgx.NamedArgs{"status": api.Completed, "finished_at": finishedAt, "trip_id": tripId}
 
 	row, err = querier.Query(timeoutCtx, sql, args)
 	if err != nil {

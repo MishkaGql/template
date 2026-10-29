@@ -17,7 +17,6 @@ type Querier interface {
 	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
 }
 
-
 func ExtractQuerier(ctx context.Context, pool *pgxpool.Pool) Querier {
 	tx, ok := GetTx(ctx)
 	if ok {
