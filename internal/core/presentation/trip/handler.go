@@ -1,128 +1,71 @@
-package handler
+package trip
 
 import (
+	"log/slog"
 	"net/http"
-	"time"
-	"uuid"
 
 	"github.com/MishkaGql/template/api"
-	"github.com/MishkaGql/template/internal/application/trip"
-	"github.com/MishkaGql/template/internal/db"
-	"github.com/MishkaGql/template/internal/errs"
-	"github.com/MishkaGql/template/internal/presentation/http/trip/converter"
+	"github.com/MishkaGql/template/internal/core/presentation/httpsender"
+	"github.com/MishkaGql/template/internal/core/presentation/problem"
+	"github.com/MishkaGql/template/internal/core/sharedkernel/errs"
 )
 
-
-type TripHandler struct {
-	service  *trip.Service
-	dbPinger *db.DbPinger
+type Handler struct {
+	service  Service
+	dbPinger Pinger
+	logger   *slog.Logger
 }
 
+var _ api.ServerInterface = (*Handler)(nil)
 
-var _ api.ServerInterface = (*TripHandler)(nil)
-
-func NewHandler(service *internal.Service, pinger *db.DbPinger) *TripHandler {
-	return &TripHandler{
+func NewHandler(service Service, pinger Pinger, logger *slog.Logger) *Handler {
+	return &Handler{
 		service:  service,
 		dbPinger: pinger,
+		logger:   logger,
 	}
 }
 
-// (POST /api/v1/trips)
-func (h *TripHandler) CreateTrip(
+func (h *Handler) CreateTrip(
 	w http.ResponseWriter,
 	r *http.Request,
-	params api.CreateTripParams,
+	_ api.CreateTripParams,
 ) {
 	var request api.TripData
-	
-	// Parse request
-	err := decodeJSON(r, &request)
-	if err != nil {
-		SendError(w, errs.InternalServiceError)
-		return
-	}
-	
-	// Buisness logic
-	output, err := h.service.Create(r.Context(), converter.ToInput(request))
-	if err != nil {
-		SendError(w, err)
+
+	if err := httpsender.ParseRequest(r, &request); err != nil {
+		problem.Send(r.Context(), h.logger, w, errs.NewValidationServiceError())
 		return
 	}
 
-	// Send response
-	err = SendResponse(w, converter.ToResponse(output), http.StatusCreated)
+	output, err := h.service.Create(r.Context(), MapToInput(request))
 	if err != nil {
-		SendError(w, errs.InternalServiceError)
+		problem.Send(r.Context(), h.logger, w, err)
 		return
 	}
+
+	w.Header().Set("Location", r.URL.Path+"/"+output.ID.String())
+	httpsender.SendResponse(w, httpsender.MIMEJSON, http.StatusCreated, MapToResponse(output))
 }
 
-// (GET /api/v1/trips/{tripId})
-func (h *TripHandler) GetTrip(w http.ResponseWriter, r *http.Request, tripId api.TripId) {
-	
-	// Buisness logic
-	response, err := h.service.Get(r.Context(), uuid.UUID(tripId))
+func (h *Handler) GetTrip(w http.ResponseWriter, r *http.Request, tripId api.TripId) {
+	output, err := h.service.Get(r.Context(), tripId)
 	if err != nil {
-		SendError(w, err)
+		problem.Send(r.Context(), h.logger, w, err)
+
 		return
 	}
-	
-	// Send response
-	err = SendResponse(w, response, http.StatusOK)
-	if err != nil {
-		SendError(w, errs.InternalServiceError)
-		return
-	}
+
+	httpsender.SendResponse(w, httpsender.MIMEJSON, http.StatusOK, MapToResponse(output))
 }
 
-// (POST /api/v1/trips/{tripId}/finish)
-func (h *TripHandler) FinishTrip(w http.ResponseWriter, r *http.Request, tripId api.TripId) {
-	
-	// Buisness logic
-	response, err := h.service.Finish(r.Context(), tripId)
+func (h *Handler) FinishTrip(w http.ResponseWriter, r *http.Request, tripId api.TripId) {
+	output, err := h.service.Finish(r.Context(), tripId)
 	if err != nil {
-		SendError(w, err)
+		problem.Send(r.Context(), h.logger, w, err)
+
 		return
 	}
-	
-	// Send response
-	err = SendResponse(w, response, http.StatusOK)
-	if err != nil {
-		SendError(w, errs.InternalServiceError)
-		return
-	}
-}
 
-// (GET /health)
-func (tripApi *TripHandler) Health(w http.ResponseWriter, r *http.Request) {
-	
-	health := api.HealthResponse{
-		Status: "ok",
-	}
-	
-	err := SendResponse(w, health, http.StatusOK)
-	if err != nil {
-		SendError(w, errs.InternalServiceError)
-	}
-}
-
-// (GET /ready)
-func (h *TripHandler) Ready(w http.ResponseWriter, r *http.Request) {
-	health := api.HealthResponse{}
-
-	err := h.dbPinger.Ping(r.Context())
-	var responseError error
-	
-	if err != nil {
-		health.Status = "fail"
-		responseError = SendResponse(w, health, http.StatusServiceUnavailable)
-	} else {
-		health.Status = "ok"
-		responseError = SendResponse(w, health, http.StatusOK)
-	}
-
-	if responseError != nil {
-		SendError(w,errs.InternalServiceError)
-	}
+	httpsender.SendResponse(w, httpsender.MIMEJSON, http.StatusOK, MapToResponse(output))
 }

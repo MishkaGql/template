@@ -2,93 +2,122 @@ package trip
 
 import (
 	"context"
+	"log/slog"
 
-	"github.com/MishkaGql/template/internal/core/application/trip/converter"
-	"github.com/MishkaGql/template/internal/core/application/trip/dto"
-	"github.com/MishkaGql/template/internal/core/domain/trip"
 	"github.com/google/uuid"
+
+	"github.com/MishkaGql/template/internal/core/domain/trip"
+	"github.com/MishkaGql/template/internal/core/sharedkernel/tracelog"
 )
 
+type BusinessMetrics interface {
+	TripCreated(ctx context.Context)
+	TripCompleted(ctx context.Context)
+}
+
 type Service struct {
-	repo 		TripRepository
-	tx         	TxManager
+	repo    Repository
+	tx      TxManager
+	logger  *slog.Logger
+	metrics BusinessMetrics
 }
 
-func NewService(repo TripRepository, tx TxManager) *Service {
+func NewService(repo Repository, tx TxManager, logger *slog.Logger, metrics BusinessMetrics) *Service {
 	return &Service{
-		repo: repo,
-		tx:   tx,
+		repo:    repo,
+		tx:      tx,
+		logger:  logger,
+		metrics: metrics,
 	}
 }
 
-func (svc Service) Create(ctx context.Context, input dto.TripInput) (dto.TripOutput, error) {
-	t := trip.New(
-		input.UserId, 
-		input.DriverId, 
+func (svc *Service) Create(ctx context.Context, input Input) (Output, error) {
+	startPoint, err := trip.NewCoordinates(input.StartPoint.Latitude, input.StartPoint.Longitude)
+	if err != nil {
+		return Output{}, err
+	}
+
+	endPoint, err := trip.NewCoordinates(input.EndPoint.Latitude, input.EndPoint.Longitude)
+	if err != nil {
+		return Output{}, err
+	}
+
+	t, err := trip.New(
+		input.UserID,
+		input.DriverID,
 		input.Price,
-		trip.Coordinates(input.StartPoint),
-		trip.Coordinates(input.EndPoint),
+		startPoint,
+		endPoint,
 	)
-	
+	if err != nil {
+		return Output{}, err
+	}
+
 	var saved *trip.Trip
-	err := svc.tx.Do(ctx, func(ctx context.Context) error {
-		var err error
-		
-		saved, err = svc.repo.Save(ctx, *t)
-		if err != nil {
-			return err
-		}
 
-		// ....
-
-		return nil
-
-	})
-	
-	if err != nil {
-		return dto.TripOutput{}, err
-	}
-
-	return converter.ToOutput(*saved), nil
-}
-
-func (svc *Service) Get(ctx context.Context, id uuid.UUID) (dto.TripOutput, error) {
-
-	t, err := svc.repo.Get(ctx, uuid.UUID(id))
-	if err != nil {
-		return dto.TripOutput{}, err
-	}
-
-	return converter.ToOutput(*t), nil
-}
-
-func (svc *Service) Finish(ctx context.Context, id uuid.UUID) (dto.TripOutput, error) {
-	
-	t, err := svc.repo.Get(ctx, uuid.UUID(id))
-	if err != nil {
-		return dto.TripOutput{}, err
-	}
-	
-	t.Complete()
-	var saved *trip.Trip
-	
 	err = svc.tx.Do(ctx, func(ctx context.Context) error {
 		var err error
-		saved, err = svc.repo.Save(ctx, *t)
+
+		saved, err = svc.repo.Create(ctx, t)
 		if err != nil {
 			return err
 		}
-		
-		//...
 
-		
-		return nil
-
+		history := trip.NewStatusHistory(saved.ID, nil, trip.StatusActive)
+		return svc.repo.SaveStatusHistory(ctx, history)
 	})
-
 	if err != nil {
-		return dto.TripOutput{}, err
+		return Output{}, err
 	}
 
-	return converter.ToOutput(*saved), nil
+	tracelog.WithTrace(ctx, svc.logger).Info("trip created",
+		slog.String("trip_id", saved.ID.String()),
+		slog.String("driver_id", saved.DriverID.String()),
+	)
+	svc.metrics.TripCreated(ctx)
+
+	return MapToOutput(saved), nil
+}
+
+func (svc *Service) Get(ctx context.Context, id uuid.UUID) (Output, error) {
+	t, err := svc.repo.Get(ctx, id)
+	if err != nil {
+		return Output{}, err
+	}
+
+	return MapToOutput(t), nil
+}
+
+func (svc *Service) Finish(ctx context.Context, id uuid.UUID) (Output, error) {
+	var saved *trip.Trip
+
+	err := svc.tx.Do(ctx, func(ctx context.Context) error {
+		t, err := svc.repo.GetForUpdate(ctx, id)
+		if err != nil {
+			return err
+		}
+
+		from := t.Status
+		if err := t.Complete(); err != nil {
+			return err
+		}
+
+		saved, err = svc.repo.Update(ctx, t)
+		if err != nil {
+			return err
+		}
+
+		history := trip.NewStatusHistory(saved.ID, &from, trip.StatusCompleted)
+		return svc.repo.SaveStatusHistory(ctx, history)
+	})
+	if err != nil {
+		return Output{}, err
+	}
+
+	tracelog.WithTrace(ctx, svc.logger).Info("trip completed",
+		slog.String("trip_id", saved.ID.String()),
+	)
+	svc.metrics.TripCompleted(ctx)
+
+	return MapToOutput(saved), nil
 }

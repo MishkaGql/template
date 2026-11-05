@@ -1,6 +1,6 @@
 schema_version = 1
 lab = 2
-components = ["postgres", "observability"]
+components = ["postgres","observability"]
 
 [env]
 DATABASE_CONNECTIONS_JITTER="6m"
