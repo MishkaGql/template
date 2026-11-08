@@ -113,10 +113,10 @@ func (h *TripHandler) Ready(w http.ResponseWriter, r *http.Request) {
 	var responseError error
 
 	if err != nil {
-		health.Status = "fail"
+		health.Status = api.Unavailable
 		responseError = SendResponse(w, health, http.StatusServiceUnavailable)
 	} else {
-		health.Status = "ok"
+		health.Status = api.Ok
 		responseError = SendResponse(w, health, http.StatusOK)
 	}
 
