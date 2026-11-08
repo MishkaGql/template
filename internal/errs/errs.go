@@ -53,7 +53,7 @@ var baseUrl = "https://tripgo.example/problems/"
 
 func ToProblem(err ServiceError) api.Problem {
 	codeDef := codeDefinitionByCode[err.Code]
-	typeUrl := baseUrl + strings.Replace(err.Code.String(), "_", "-", 0)
+	typeUrl := baseUrl + strings.Replace(err.Code.String(), "_", "-", -1)
 
 	return api.Problem{
 		Title:  codeDef.Title,

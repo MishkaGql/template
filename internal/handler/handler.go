@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/MishkaGql/template/api"
 	"github.com/MishkaGql/template/internal"
 	"github.com/MishkaGql/template/internal/db"
@@ -36,16 +38,22 @@ func (h *TripHandler) CreateTrip(
 
 	err := decodeJSON(r, &trip)
 	if err != nil {
-		SendError(w, errs.InternalServiceError)
+		SendError(w, errs.ValidationServiceError)
 		return
 	}
-	
+
+	if trip.UserId == uuid.Nil || trip.DriverId == uuid.Nil {
+		SendError(w, errs.ValidationServiceError)
+		return
+	}
+
 	response, err := h.service.Create(r.Context(), trip, tripStartedAt)
 	if err != nil {
 		SendError(w, err)
 		return
 	}
-	
+
+	w.Header().Set("Location", "/api/v1/trips/"+response.Id.String())
 	err = SendResponse(w, response, http.StatusCreated)
 	if err != nil {
 		SendError(w, errs.InternalServiceError)
@@ -103,16 +111,16 @@ func (h *TripHandler) Ready(w http.ResponseWriter, r *http.Request) {
 
 	err := h.dbPinger.Ping(r.Context())
 	var responseError error
-	
+
 	if err != nil {
 		health.Status = "fail"
 		responseError = SendResponse(w, health, http.StatusServiceUnavailable)
 	} else {
 		health.Status = "ok"
-		responseError =SendResponse(w, health, http.StatusOK)
+		responseError = SendResponse(w, health, http.StatusOK)
 	}
 
 	if responseError != nil {
-		SendError(w,errs.InternalServiceError)
+		SendError(w, errs.InternalServiceError)
 	}
 }

@@ -11,6 +11,7 @@ import (
 )
 
 type ctxKey string
+
 const txKey ctxKey = "tx"
 
 type PgxTxManager struct {
@@ -24,7 +25,7 @@ func NewPgxTxManager(pool *pgxpool.Pool) *PgxTxManager {
 }
 
 // fn() должна возвращать бизнес ошибки, поэтому ошибку в ней не оборачиваем.
-// Метод оборачивает только Begin(), Rollback(), Commit().
+// Метод оборачивает только BeginTx(), Rollback(), Commit().
 func (m *PgxTxManager) Do(ctx context.Context, fn func(ctx context.Context) error) (err error) {
 	// Если вызываем Do() внутри fn() (вложенная транзакция) - не начинаем новую транзакцию.
 	// При rollback - откатятся все вложенные.
@@ -33,7 +34,9 @@ func (m *PgxTxManager) Do(ctx context.Context, fn func(ctx context.Context) erro
 		return fn(ctx)
 	}
 
-	tx, err := m.pool.Begin(ctx)
+	tx, err := m.pool.BeginTx(ctx, pgx.TxOptions{
+		IsoLevel: pgx.ReadCommitted,
+	})
 	if err != nil {
 		return errs.NewInternalServiceError(err)
 	}
@@ -59,7 +62,7 @@ func (m *PgxTxManager) Do(ctx context.Context, fn func(ctx context.Context) erro
 	txContext := context.WithValue(ctx, txKey, tx)
 
 	err = fn(txContext)
-	
+
 	if err != nil {
 		return err
 	}
@@ -73,7 +76,7 @@ func (m *PgxTxManager) Do(ctx context.Context, fn func(ctx context.Context) erro
 }
 
 func GetTx(ctx context.Context) (pgx.Tx, bool) {
-	tx, ok := ctx.Value(txKey).(pgx.Tx);
+	tx, ok := ctx.Value(txKey).(pgx.Tx)
 	if ok {
 		return tx, true
 	}

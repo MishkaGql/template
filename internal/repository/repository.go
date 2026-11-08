@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	sq "github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -16,6 +17,8 @@ import (
 	"github.com/MishkaGql/template/internal/repository/entity"
 	"github.com/MishkaGql/template/internal/repository/mapper"
 )
+
+var psql = sq.StatementBuilder.PlaceholderFormat(sq.Dollar)
 
 type TripRepository struct {
 	pool         *pgxpool.Pool
@@ -37,24 +40,19 @@ func (r *TripRepository) SaveTripStatusHistory(
 	reason *string,
 ) error {
 	querier := db.ExtractQuerier(ctx, r.pool)
-	
-	sql := `
-		INSERT INTO trip_status_history 
-		(trip_id, from_status, to_status, reason) 
-		VALUES 
-		(@trip_id, @from_status, @to_status, @reason)
-	`
-	args := pgx.NamedArgs{
-		"trip_id":     id,
-		"from_status": from,
-		"to_status":   to,
-		"reason":      reason,
+
+	query, args, err := psql.Insert("trip_status_history").
+		Columns("trip_id", "from_status", "to_status", "reason").
+		Values(id, from, to, reason).
+		ToSql()
+	if err != nil {
+		return errs.NewInternalServiceError(err)
 	}
 
 	timeoutCtx, cancel := context.WithTimeout(ctx, r.queryTimeout)
 	defer cancel()
 
-	_, err := querier.Exec(timeoutCtx, sql, args)
+	_, err = querier.Exec(timeoutCtx, query, args...)
 	if err != nil {
 		return errs.NewInternalServiceError(err)
 	}
@@ -65,26 +63,29 @@ func (r *TripRepository) SaveTripStatusHistory(
 func (r *TripRepository) Create(ctx context.Context, trip api.Trip) (api.Trip, error) {
 	querier := db.ExtractQuerier(ctx, r.pool)
 
-	sql := `
-	  	INSERT INTO trips (
-		   id, user_id, driver_id,
-		   start_latitude, start_longitude,
-		   end_latitude, end_longitude,
-		   price, status, started_at
-		 ) VALUES (
-				@id, @user_id, @driver_id,
-				@start_latitude, @start_longitude,
-				@end_latitude, @end_longitude,
-				@price, @status, @started_at
-	   	)
-		RETURNING *
-  	`
-	args := pgx.StructArgs(mapper.ToEntity(trip))
+	query, args, err := psql.Insert("trips").
+		Columns(
+			"id", "user_id", "driver_id",
+			"start_latitude", "start_longitude",
+			"end_latitude", "end_longitude",
+			"price", "status", "started_at",
+		).
+		Values(
+			trip.Id, trip.UserId, trip.DriverId,
+			trip.StartPoint.Latitude, trip.StartPoint.Longitude,
+			trip.EndPoint.Latitude, trip.EndPoint.Longitude,
+			trip.Price, trip.Status, trip.StartedAt,
+		).
+		Suffix("RETURNING *").
+		ToSql()
+	if err != nil {
+		return api.Trip{}, errs.NewInternalServiceError(err)
+	}
 
 	timeoutCtx, cancel := context.WithTimeout(ctx, r.queryTimeout)
 	defer cancel()
 
-	row, err := querier.Query(timeoutCtx, sql, args)
+	row, err := querier.Query(timeoutCtx, query, args...)
 	if err != nil {
 		return api.Trip{}, errs.NewInternalServiceError(err)
 	}
@@ -104,13 +105,18 @@ func (r *TripRepository) Create(ctx context.Context, trip api.Trip) (api.Trip, e
 func (r *TripRepository) Get(ctx context.Context, tripId uuid.UUID) (api.Trip, error) {
 	querier := db.ExtractQuerier(ctx, r.pool)
 
-	sql := `SELECT * from trips where id = @id`
-	args := pgx.NamedArgs{"id": tripId}
+	query, args, err := psql.Select("*").
+		From("trips").
+		Where(sq.Eq{"id": tripId}).
+		ToSql()
+	if err != nil {
+		return api.Trip{}, errs.NewInternalServiceError(err)
+	}
 
 	timeoutCtx, cancel := context.WithTimeout(ctx, r.queryTimeout)
 	defer cancel()
 
-	row, err := querier.Query(timeoutCtx, sql, args)
+	row, err := querier.Query(timeoutCtx, query, args...)
 	if err != nil {
 		return api.Trip{}, errs.NewInternalServiceError(err)
 	}
@@ -129,13 +135,19 @@ func (r *TripRepository) Get(ctx context.Context, tripId uuid.UUID) (api.Trip, e
 func (r *TripRepository) Finish(ctx context.Context, tripId uuid.UUID, finishedAt time.Time) (api.Trip, error) {
 	querier := db.ExtractQuerier(ctx, r.pool)
 
-	sql := `SELECT status from trips WHERE id = @id FOR UPDATE`
-	args := pgx.NamedArgs{"id": tripId}
+	query, args, err := psql.Select("status").
+		From("trips").
+		Where(sq.Eq{"id": tripId}).
+		Suffix("FOR UPDATE").
+		ToSql()
+	if err != nil {
+		return api.Trip{}, errs.NewInternalServiceError(err)
+	}
 
 	timeoutCtx, cancel := context.WithTimeout(ctx, r.queryTimeout)
 	defer cancel()
 
-	row, err := querier.Query(timeoutCtx, sql, args)
+	row, err := querier.Query(timeoutCtx, query, args...)
 	if err != nil {
 		return api.Trip{}, errs.NewInternalServiceError(err)
 	}
@@ -152,16 +164,17 @@ func (r *TripRepository) Finish(ctx context.Context, tripId uuid.UUID, finishedA
 		return api.Trip{}, errs.NewServiceError(errs.TripAlreadyCompleted, "Operation is not allowed for a completed trip")
 	}
 
-	sql = `
-		UPDATE trips
-			SET status = @status,
-				finished_at = @finished_at
-		WHERE id = @trip_id
-		RETURNING *
-	`
-	args = pgx.NamedArgs{"status": api.Completed, "finished_at": finishedAt, "trip_id": tripId}
+	query, args, err = psql.Update("trips").
+		Set("status", api.Completed).
+		Set("finished_at", finishedAt).
+		Where(sq.Eq{"id": tripId}).
+		Suffix("RETURNING *").
+		ToSql()
+	if err != nil {
+		return api.Trip{}, errs.NewInternalServiceError(err)
+	}
 
-	row, err = querier.Query(timeoutCtx, sql, args)
+	row, err = querier.Query(timeoutCtx, query, args...)
 	if err != nil {
 		return api.Trip{}, errs.NewInternalServiceError(err)
 	}
