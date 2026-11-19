@@ -1,56 +1,24 @@
 package errs
 
 import (
+	"errors"
 	"log/slog"
 )
 
-type ServiceError struct {
+type Code string
+
+const (
+	InvalidRequest Code = "invalid_request"
+	InternalError  Code = "internal_error"
+)
+
+type Error struct {
 	message string
-	code    ErrorCode
+	code    Code
 	cause   error
 }
 
-var _ AbstractError = (*ServiceError)(nil)
-
-func NewServiceError(code ErrorCode, msg string) *ServiceError {
-	return &ServiceError{
-		code:    code,
-		message: msg,
-	}
-}
-
-func NewServiceErrorWithCause(code ErrorCode, msg string, cause error) *ServiceError {
-	return &ServiceError{
-		code:    code,
-		message: msg,
-		cause:   cause,
-	}
-}
-
-func (e *ServiceError) Message() *string {
-	if e.message == "" {
-		return nil
-	}
-
-	return &e.message
-}
-
-func (e *ServiceError) Code() ErrorCode {
-	return e.code
-}
-
-func (e *ServiceError) Cause() error {
-	return e.cause
-}
-
-func (e *ServiceError) LogValue() slog.Value {
-	return slog.GroupValue(
-		slog.String("msg", e.message),
-		slog.String("code", e.code.String()),
-	)
-}
-
-func (e *ServiceError) Error() string {
+func (e *Error) Error() string {
 	switch {
 	case e.message == "":
 		if e.cause == nil {
@@ -64,21 +32,38 @@ func (e *ServiceError) Error() string {
 	}
 }
 
-func (e *ServiceError) Unwrap() error {
+func (e *Error) Unwrap() error {
 	return e.cause
 }
 
-func NewInternalServiceError(cause error) *ServiceError {
-	return &ServiceError{
-		message: "Internal service error",
-		code:    InternalError,
-		cause:   cause,
+func (e *Error) Message() *string {
+	if e.message == "" {
+		return nil
 	}
+
+	return &e.message
 }
 
-func NewValidationServiceError() *ServiceError {
-	return &ServiceError{
-		message: "Validation",
-		code:    InvalidRequest,
+func (e *Error) Code() Code {
+	return e.code
+}
+
+func (e *Error) LogValue() slog.Value {
+	attrs := []slog.Attr{
+		slog.String("msg", e.message),
+		slog.String("code", string(e.code)),
 	}
+	if e.cause != nil {
+		attrs = append(attrs, slog.Any("cause", e.cause))
+	}
+
+	return slog.GroupValue(attrs...)
+}
+
+func AsError(err error) (*Error, bool) {
+	if absErr, ok := errors.AsType[*Error](err); ok {
+		return absErr, true
+	}
+
+	return nil, false
 }

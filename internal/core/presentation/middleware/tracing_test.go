@@ -28,7 +28,7 @@ func TestTracing_No_SpanNamedByRouteTemplate(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/trips/1f0a9c62-4a1c-4f2e-9d33-2a4bb0f0b111/finish", nil)
 
-	Tracing("trip-service", func(*http.Request) string { return "/api/v1/trips/{tripId}/finish" })(handler).ServeHTTP(rec, req)
+	Tracing("trips-service", func(*http.Request) string { return "/api/v1/trips/{tripId}/finish" })(handler).ServeHTTP(rec, req)
 
 	require.NoError(t, provider.ForceFlush(context.Background()))
 

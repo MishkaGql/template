@@ -17,25 +17,23 @@ infra:
 	tripgoctl connect
 
 migrate:
-	goose -dir $(MIGRATION_DIR) postgres "$(DATABASE_URL)" up
+	go tool goose -dir $(MIGRATION_DIR) postgres "$(DATABASE_URL)" up
 
 down-migrate:
-	goose -dir $(MIGRATION_DIR) postgres "$(DATABASE_URL)" down
+	go tool goose -dir $(MIGRATION_DIR) postgres "$(DATABASE_URL)" down
 
-generate:
+generate: client mocks
 	go tool oapi-codegen --config $(SPEC_DIR)/oapi-codegen.yaml $(SPEC_DIR)/trip-service.openapi.yaml
+
+client:
+	go tool oapi-codegen --config $(SPEC_DIR)/client-codegen.yaml $(SPEC_DIR)/push-service.openapi.yaml
 
 mocks:
 	go generate ./...
+	go tool mockgen -source=internal/worker/positions/contract.go -destination=internal/worker/positions/mocks_test.go -package=positions
 
 run:
 	go run cmd/service/main.go
-
-swagger:
-	docker run -d -p 8081:8080 \
-		-v ./$(SPEC_DIR):/app/specs \
-		-e SWAGGER_JSON=/app/specs/trip-service.openapi.yaml \
-		swaggerapi/swagger-ui
 
 test:
 	go test -count=1 -race -cover ./...
@@ -44,9 +42,11 @@ test:
 	@rm -f $(COVERAGE_FILE)
 
 test-integration:
-	go test -count=1 -race -timeout 10m -tags integration ./internal/tests/...
+	go test -count=1 -race -timeout 10m ./internal/integrationtests/...
 
+format:
+	$(GOLANGCI_LINT) fmt ./...
 lint:
 	$(GOLANGCI_LINT) run ./...
 
-.PHONY: all infra migrate down-migrate generate mocks run swagger test test-integration lint
+.PHONY: all infra migrate down-migrate generate client mocks format run test test-integration lint

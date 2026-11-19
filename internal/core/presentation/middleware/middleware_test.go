@@ -68,7 +68,7 @@ func assertLoggedLevel(t *testing.T, status int, want slog.Level) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/trips", nil)
 
-	Logging("trip-service", slog.New(recorder), func(*http.Request) string { return "/api/v1/trips" })(handler).
+	Logging("trips-service", slog.New(recorder), func(*http.Request) string { return "/api/v1/trips" })(handler).
 		ServeHTTP(rec, req)
 
 	require.Len(t, recorder.records, 1)
@@ -78,7 +78,7 @@ func assertLoggedLevel(t *testing.T, status int, want slog.Level) {
 	assert.Equal(t, "request handled", record.Message)
 	assert.Equal(t, "/api/v1/trips", attrOf(t, record, "route"))
 	assert.Equal(t, http.MethodPost, attrOf(t, record, "method"))
-	assert.Equal(t, "trip-service", attrOf(t, record, "service"))
+	assert.Equal(t, "trips-service", attrOf(t, record, "service"))
 }
 
 func attrOf(t *testing.T, record slog.Record, key string) string {

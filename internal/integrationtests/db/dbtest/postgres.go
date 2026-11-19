@@ -22,19 +22,17 @@ type Postgres struct {
 }
 
 const (
-	image     string = "postgres:15-alpine"
-	defaultDb string = "tripgo_test"
-
-	pgDialect goose.Dialect = "postgres"
-
+	image        string        = "postgres:15-alpine"
+	defaultDB    string        = "tripgo_test"
+	pgDialect    goose.Dialect = "postgres"
 	QueryTimeout time.Duration = 3 * time.Second
 )
 
 func Start(ctx context.Context) (*Postgres, error) {
 	container, err := postgres.Run(ctx, image,
-		postgres.WithDatabase(defaultDb),
-		postgres.WithUsername(defaultDb),
-		postgres.WithPassword(defaultDb),
+		postgres.WithDatabase(defaultDB),
+		postgres.WithUsername(defaultDB),
+		postgres.WithPassword(defaultDB),
 		postgres.BasicWaitStrategies(),
 	)
 	if err != nil {
@@ -59,18 +57,24 @@ func (p *Postgres) InitPool(ctx context.Context) (*pgxpool.Pool, error) {
 	}
 
 	if err = pool.Ping(ctx); err != nil {
+		pool.Close()
 		return nil, fmt.Errorf("ping pool: %w", err)
 	}
 
 	return pool, nil
 }
 
-func migrate(ctx context.Context, dsn string) error {
+func migrate(ctx context.Context, dsn string) (err error) {
 	conn, err := sql.Open("pgx", dsn)
 	if err != nil {
 		return fmt.Errorf("open pgx conn: %w", err)
 	}
-	defer conn.Close()
+
+	defer func() {
+		if closeErr := conn.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("close migration connection: %w", closeErr))
+		}
+	}()
 
 	provider, err := goose.NewProvider(pgDialect, conn, migrations.FS)
 	if err != nil {

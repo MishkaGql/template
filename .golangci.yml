@@ -1,136 +1,186 @@
-# Пример конфига golangci-lint для сервиса курса.
-# Скопируйте в корень своего репозитория как .golangci.yml.
-#
-# За основу взят обязательный набор линтеров из боевых Go-сервисов, плюс depguard
-# с правилами слоёв из лабораторной работы 2.
-
 version: "2"
 
 run:
-  concurrency: 8
   timeout: 5m
+  modules-download-mode: readonly
   build-tags:
     - integration
+
+output:
+  formats:
+    text:
+      path: stdout
+      colors: true
+  sort-order:
+    - file
+    - linter
 
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
+  uniq-by-line: false
+  whole-files: true
+
+
+formatters:
+    enable:
+      - gci
+      - gofumpt
+    settings:
+      gci:
+        custom-order: true
+        sections:
+          - standard
+          - default
+          - localmodule
+
+      gofumpt:
+        extra:
+          # группирует переменные в 1 тип
+          group-params: true
+
+          # делает из return; - return {переменная}
+          clothe-returns: true
+
+          # перенос скобки
+          balance-calls: true
+
+    exclusions:
+      generated: strict
+      paths:
+        - api/
+        - migrations/
+        - gen/
 
 linters:
   default: none
   enable:
-    - depguard        # правила зависимостей между слоями, см. лабораторную работу 2
-    - errcheck
-    - forbidigo
-    - gochecknoinits
-    - gocritic
-    - gocyclo
-    - goconst
-    - gosec
+    # Security and Bugs
     - govet
+    - gosec
+    - staticcheck
+    - durationcheck
+
     - ineffassign
     - makezero
-    - prealloc
-    - revive
-    - staticcheck
+    - unused
     - unconvert
     - unparam
-    - unused
-    - whitespace
+
+    # Readbility
+    - asciicheck
+    - nolintlint
+
+    # Errors
+    - errcheck
+    - errorlint
+    - nilerr
+    - nilnesserr
+
+    # Database
+    - rowserrcheck
+    - sqlclosecheck
+
+    # Serialization
+    - musttag
+    - bodyclose
+
+    # Tests
+    - thelper
+
+    # Architecture
+    - depguard
+
+  exclusions:
+    generated: strict
+    paths:
+      - '(^|/)api/'
+      - '(^|/)migrations/'
+      - '(^|/)gen/'
 
   settings:
-    # Слои: домен ничего не знает про инфраструктуру, usecase не знает про транспорт.
-    # Так правило перестаёт быть договорённостью и становится частью сборки.
+    errorlint:
+      # не предлагает %w вместо %v
+      errorf: false
+
+    # имя параметра не обязательно t, b, tb, f
+    thelper:
+      test:
+        name: false
+      benchmark:
+        name: false
+      tb:
+        name: false
+      fuzz:
+        name: false
+    staticcheck:
+      checks: ["all", "-ST1000", "-ST1020", "-ST1021", "-ST1022"]
+    nolintlint:
+      # поясняем почему
+      require-explanation: true
+
+      # какой конкретно линтер
+      require-specific: true
+
     depguard:
       rules:
-        domain:
-          files:
-            - "**/internal/core/domain/**"
-          deny:
-            - pkg: net/http
-              desc: домен не знает про транспорт
-            - pkg: github.com/go-chi/chi
-              desc: домен не знает про роутер
-            - pkg: github.com/jackc/pgx
-              desc: домен не знает про бд
-            - pkg: github.com/Masterminds/squirrel
-              desc: домен не строит SQL
-            - pkg: go.opentelemetry.io/otel
-              desc: домен не знает про телеметрию
-        application:
-          files:
-            - "**/internal/core/application/**"
-          deny:
-            - pkg: net/http
-              desc: usecase не знает про транспорт
-            - pkg: github.com/go-chi/chi
-              desc: usecase не знает про роутер
-            - pkg: github.com/jackc/pgx
-              desc: usecase работает через интерфейсы, а не через драйвер бд
-            - pkg: github.com/Masterminds/squirrel
-              desc: usecase не строит SQL
-            - pkg: github.com/MishkaGql/template/internal/core/infrastructure
-              desc: usecase зависит от портов, а не от реализации
+
         presentation:
+          list-mode: lax
           files:
-            - "**/internal/core/presentation/**"
+            - "**/internal/core/presentation/{**/,}*.go"
           deny:
+            - pkg: github.com/MishkaGql/template/internal/core/infrastructure/
+              desc: presentation не знает о infrastructure
+
             - pkg: github.com/jackc/pgx
-              desc: presentation не работает с драйвером бд
-            - pkg: github.com/MishkaGql/template/internal/core/infrastructure
-              desc: presentation не знает про инфраструктуру
+              desc: presentation не знает о pgx
 
-    # Запрещает обращения через идентификатор с подчёркиванием, поэтому пакеты
-    # называем без snake_case: internal/adapter/http, а не internal/adapter/http_server.
-    forbidigo:
-      forbid:
-        - pattern: ^[A-Za-z0-9]{1,}_.*\.
+        application:
+          list-mode: lax
+          files:
+            - "**/internal/core/application/{**/,}*.go"
+          deny:
+            - pkg: github.com/MishkaGql/template/internal/core/infrastructure/
+              desc: application не знает о infrastructure
 
-    revive:
-      rules:
-        - name: var-naming
-          disabled: true
+            - pkg: github.com/MishkaGql/template/internal/core/presentation/
+              desc: application не знает о infrastructure
 
-    unparam:
-      check-exported: true
+            - pkg: net/http
+              desc: application не знает о http
 
-    unused:
-      field-writes-are-uses: false
+            - pkg: github.com/jackc/pgx
+              desc: application не знает о pgx
 
-  exclusions:
-    generated: lax
-    presets:
-      - comments
-      - common-false-positives
-      - legacy
-      - std-error-handling
-    paths:
-      - third_party$
-      - builtin$
-      - examples$
-      # сгенерированный по OpenAPI и protobuf код не линтуем
-      - api/
-      - gen/
+        domain:
+          list-mode: lax
+          files:
+            - "**/internal/core/domain/{**/,}*.go"
+          deny:
+            - pkg: github.com/MishkaGql/template/internal/core/presentation/
+              desc: domain не знает о presentation
 
-formatters:
-  enable:
-    - gofumpt
-    - gci
+            - pkg: github.com/MishkaGql/template/internal/core/application/
+              desc: domain не знает о application
 
-  settings:
-    gci:
-      sections:
-        - standard
-        - default
-        - localmodule
-    gofumpt:
-      extra:
-        group-params: true
-        clothe-returns: true
+            - pkg: github.com/MishkaGql/template/internal/core/infrastructure/
+              desc: domain не знает о infrastructure
 
-  exclusions:
-    generated: lax
-    paths:
-      - third_party$
-      - builtin$
-      - examples$
+
+            - pkg: net/http
+              desc: domain не знает о http
+
+            - pkg: github.com/jackc/pgx
+              desc: domain не знает о pgx
+
+            - pkg: go.opentelemetry.io/otel
+              desc: domain не знает о opentelemetry
+
+        infrastructure:
+          list-mode: lax
+          files:
+            - "**/internal/core/infrastructure/{**/,}*.go"
+          deny:
+            - pkg: github.com/MishkaGql/template/internal/core/presentation/
+              desc: infrastructure не должен знать о presentation

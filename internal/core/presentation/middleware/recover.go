@@ -24,7 +24,7 @@ func Recover(logger *slog.Logger) func(http.Handler) http.Handler {
 					slog.String("stack", string(debug.Stack())),
 				)
 
-				problem.Send(r.Context(), logger, w, errs.NewInternalServiceError(nil))
+				problem.Send(r.Context(), logger, w, errs.NewInternal(nil))
 			}()
 
 			next.ServeHTTP(w, r)

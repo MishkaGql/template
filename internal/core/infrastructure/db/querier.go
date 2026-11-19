@@ -14,7 +14,7 @@ type Querier interface {
 }
 
 func ExtractQuerier(ctx context.Context, pool *pgxpool.Pool) Querier {
-	if tx, ok := getTx(ctx); ok {
+	if tx, ok := ExtractTx(ctx); ok {
 		return tx
 	}
 

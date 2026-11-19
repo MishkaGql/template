@@ -8,6 +8,13 @@ import (
 	"github.com/MishkaGql/template/internal/core/sharedkernel/errs"
 )
 
+const (
+	CodeDriverBusy           errs.Code = "driver_busy"
+	CodeTripNotFound         errs.Code = "trip_not_found"
+	CodeTripAlreadyCompleted errs.Code = "trip_completed"
+	CodeIdempotencyConflict  errs.Code = "idempotency_conflict"
+)
+
 type Status string
 
 const (
@@ -15,20 +22,10 @@ const (
 	StatusCompleted Status = "completed"
 )
 
-type Coordinates struct {
-	Latitude  float64
-	Longitude float64
-}
-
-func NewCoordinates(latitude, longitude float64) (Coordinates, error) {
-	if latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180 {
-		return Coordinates{}, errs.NewValidationServiceError()
-	}
-
-	return Coordinates{
-		Latitude:  latitude,
-		Longitude: longitude,
-	}, nil
+type StatusHistory struct {
+	TripID     uuid.UUID
+	FromStatus *Status
+	ToStatus   Status
 }
 
 type Trip struct {
@@ -55,12 +52,20 @@ func New(
 	endPoint Coordinates,
 ) (*Trip, error) {
 	if userID == uuid.Nil || driverID == uuid.Nil || price < 0 {
-		return nil, errs.NewValidationServiceError()
+		return nil, errs.NewValidation()
+	}
+
+	if err := startPoint.validate(); err != nil {
+		return nil, err
+	}
+
+	if err := endPoint.validate(); err != nil {
+		return nil, err
 	}
 
 	id, err := uuid.NewV7()
 	if err != nil {
-		return nil, errs.NewInternalServiceError(err)
+		return nil, errs.NewInternal(err)
 	}
 
 	return &Trip{
@@ -79,7 +84,7 @@ func New(
 
 func (t *Trip) Complete() error {
 	if t.Status == StatusCompleted {
-		return errs.NewServiceError(CodeTripAlreadyCompleted, "Operation is not allowed for a completed trip")
+		return errs.New(CodeTripAlreadyCompleted, "Operation is not allowed for a completed trips", nil)
 	}
 
 	t.Status = StatusCompleted

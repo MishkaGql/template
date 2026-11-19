@@ -8,7 +8,7 @@ import (
 	"github.com/MishkaGql/template/internal/core/domain/trip"
 )
 
-func MapToTripDomain(t TripEntity) *trip.Trip {
+func toTripDomain(t TripEntity) *trip.Trip {
 	return &trip.Trip{
 		ID:       t.ID,
 		UserID:   t.UserID,
@@ -25,12 +25,13 @@ func MapToTripDomain(t TripEntity) *trip.Trip {
 			Longitude: t.EndLongitude,
 		},
 
-		StartedAt:  t.StartedAt,
-		FinishedAt: toTime(t.FinishedAt),
+		StartedAt:      t.StartedAt,
+		FinishedAt:     toTime(t.FinishedAt),
+		LastPositionAt: toTime(t.LastPositionAt),
 	}
 }
 
-func MapToTripEntity(t *trip.Trip) TripEntity {
+func toTripEntity(t *trip.Trip) TripEntity {
 	return TripEntity{
 		ID:       t.ID,
 		UserID:   t.UserID,
@@ -43,12 +44,35 @@ func MapToTripEntity(t *trip.Trip) TripEntity {
 		EndLatitude:    t.EndPoint.Latitude,
 		EndLongitude:   t.EndPoint.Longitude,
 
-		StartedAt:  t.StartedAt,
-		FinishedAt: toPgxTime(t.FinishedAt),
+		StartedAt:      t.StartedAt,
+		FinishedAt:     toPgxTime(t.FinishedAt),
+		LastPositionAt: toPgxTime(t.LastPositionAt),
 	}
 }
 
-func MapToStatusHistoryEntity(h *trip.StatusHistory) StatusHistoryEntity {
+func toPositionDomain(position PositionEntity) *trip.Position {
+	return &trip.Position{
+		ID:     position.ID,
+		TripID: position.TripID,
+		Coordinates: trip.Coordinates{
+			Latitude:  position.Latitude,
+			Longitude: position.Longitude,
+		},
+		RecordedAt: position.RecordedAt,
+	}
+}
+
+func toPositionEntity(position *trip.Position) PositionEntity {
+	return PositionEntity{
+		ID:         position.ID,
+		TripID:     position.TripID,
+		Latitude:   position.Coordinates.Latitude,
+		Longitude:  position.Coordinates.Longitude,
+		RecordedAt: position.RecordedAt,
+	}
+}
+
+func toStatusHistoryEntity(h *trip.StatusHistory) StatusHistoryEntity {
 	entity := StatusHistoryEntity{
 		TripID:   h.TripID,
 		ToStatus: string(h.ToStatus),

@@ -1,25 +1,24 @@
 package errstest
 
 import (
-	"errors"
 	"testing"
 
 	"github.com/MishkaGql/template/internal/core/sharedkernel/errs"
 )
 
-func AssertCode(t *testing.T, err error, want errs.ErrorCode) {
+func AssertCode(t *testing.T, err error, want errs.Code) {
 	t.Helper()
 
 	if err == nil {
-		t.Fatalf("code: got nil, want: code %q", want)
+		t.Fatalf("error = nil, want *errs.Error with code %q", want)
 	}
 
-	var absErr errs.AbstractError
-	if !errors.As(err, &absErr) {
-		t.Fatalf("err type: got: %T, want: %T ", err, absErr)
+	publicErr, ok := errs.AsError(err)
+	if !ok {
+		t.Fatalf("error type = %T, want *errs.Error in error chain", err)
 	}
 
-	if absErr.Code() != want {
-		t.Errorf("code: got %q, want %q", absErr.Code(), want)
+	if got := publicErr.Code(); got != want {
+		t.Errorf("code = %q, want %q", got, want)
 	}
 }

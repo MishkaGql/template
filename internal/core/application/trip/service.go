@@ -13,6 +13,7 @@ import (
 type BusinessMetrics interface {
 	TripCreated(ctx context.Context)
 	TripCompleted(ctx context.Context)
+	PositionSaved(ctx context.Context)
 }
 
 type Service struct {
@@ -31,68 +32,50 @@ func NewService(repo Repository, tx TxManager, logger *slog.Logger, metrics Busi
 	}
 }
 
-func (svc *Service) Create(ctx context.Context, input Input) (Output, error) {
-	startPoint, err := trip.NewCoordinates(input.StartPoint.Latitude, input.StartPoint.Longitude)
-	if err != nil {
-		return Output{}, err
-	}
-
-	endPoint, err := trip.NewCoordinates(input.EndPoint.Latitude, input.EndPoint.Longitude)
-	if err != nil {
-		return Output{}, err
-	}
-
+func (s *Service) Create(ctx context.Context, input Input) (*trip.Trip, error) {
 	t, err := trip.New(
 		input.UserID,
 		input.DriverID,
 		input.Price,
-		startPoint,
-		endPoint,
+		trip.Coordinates(input.StartPoint),
+		trip.Coordinates(input.EndPoint),
 	)
 	if err != nil {
-		return Output{}, err
+		return nil, err
 	}
 
 	var saved *trip.Trip
-
-	err = svc.tx.Do(ctx, func(ctx context.Context) error {
-		var err error
-
-		saved, err = svc.repo.Create(ctx, t)
+	err = s.tx.Do(ctx, func(ctx context.Context) error {
+		saved, err = s.repo.Create(ctx, t)
 		if err != nil {
 			return err
 		}
 
-		history := trip.NewStatusHistory(saved.ID, nil, trip.StatusActive)
-		return svc.repo.SaveStatusHistory(ctx, history)
+		history := &trip.StatusHistory{TripID: saved.ID, ToStatus: saved.Status}
+		return s.repo.SaveStatusHistory(ctx, history)
 	})
 	if err != nil {
-		return Output{}, err
+		return nil, err
 	}
 
-	tracelog.WithTrace(ctx, svc.logger).Info("trip created",
+	tracelog.WithTrace(ctx, s.logger).Info("trips created",
 		slog.String("trip_id", saved.ID.String()),
 		slog.String("driver_id", saved.DriverID.String()),
 	)
-	svc.metrics.TripCreated(ctx)
+	s.metrics.TripCreated(ctx)
 
-	return MapToOutput(saved), nil
+	return saved, nil
 }
 
-func (svc *Service) Get(ctx context.Context, id uuid.UUID) (Output, error) {
-	t, err := svc.repo.Get(ctx, id)
-	if err != nil {
-		return Output{}, err
-	}
-
-	return MapToOutput(t), nil
+func (s *Service) Get(ctx context.Context, id uuid.UUID) (*trip.Trip, error) {
+	return s.repo.Get(ctx, id)
 }
 
-func (svc *Service) Finish(ctx context.Context, id uuid.UUID) (Output, error) {
+func (s *Service) Finish(ctx context.Context, id uuid.UUID) (*trip.Trip, error) {
 	var saved *trip.Trip
 
-	err := svc.tx.Do(ctx, func(ctx context.Context) error {
-		t, err := svc.repo.GetForUpdate(ctx, id)
+	err := s.tx.Do(ctx, func(ctx context.Context) error {
+		t, err := s.repo.GetForUpdate(ctx, id)
 		if err != nil {
 			return err
 		}
@@ -102,22 +85,56 @@ func (svc *Service) Finish(ctx context.Context, id uuid.UUID) (Output, error) {
 			return err
 		}
 
-		saved, err = svc.repo.Update(ctx, t)
+		saved, err = s.repo.Update(ctx, t)
 		if err != nil {
 			return err
 		}
 
-		history := trip.NewStatusHistory(saved.ID, &from, trip.StatusCompleted)
-		return svc.repo.SaveStatusHistory(ctx, history)
+		history := &trip.StatusHistory{TripID: saved.ID, FromStatus: &from, ToStatus: saved.Status}
+		return s.repo.SaveStatusHistory(ctx, history)
 	})
 	if err != nil {
-		return Output{}, err
+		return nil, err
 	}
 
-	tracelog.WithTrace(ctx, svc.logger).Info("trip completed",
+	tracelog.WithTrace(ctx, s.logger).Info("trips completed",
 		slog.String("trip_id", saved.ID.String()),
 	)
-	svc.metrics.TripCompleted(ctx)
+	s.metrics.TripCompleted(ctx)
 
-	return MapToOutput(saved), nil
+	return saved, nil
+}
+
+func (s *Service) CreateTripPosition(ctx context.Context, id uuid.UUID, input PositionInput) (*trip.Position, error) {
+	var saved *trip.Position
+
+	err := s.tx.Do(ctx, func(ctx context.Context) error {
+		t, err := s.repo.GetForUpdate(ctx, id)
+		if err != nil {
+			return err
+		}
+
+		position, err := t.AddPosition(trip.Coordinates(input.Coords), input.RecordedAt)
+		if err != nil {
+			return err
+		}
+
+		saved, err = s.repo.CreateTripPosition(ctx, position)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	s.metrics.PositionSaved(ctx)
+	return saved, nil
+}
+
+func (s *Service) ListTripPositions(ctx context.Context, id uuid.UUID) ([]trip.Position, error) {
+	if _, err := s.repo.Get(ctx, id); err != nil {
+		return nil, err
+	}
+
+	pos, err := s.repo.ListTripPositions(ctx, id)
+	return pos, err
 }

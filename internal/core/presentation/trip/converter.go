@@ -2,21 +2,22 @@ package trip
 
 import (
 	"github.com/MishkaGql/template/api"
-	"github.com/MishkaGql/template/internal/core/application/trip"
+	applicationTrip "github.com/MishkaGql/template/internal/core/application/trip"
+	"github.com/MishkaGql/template/internal/core/domain/trip"
 )
 
-func MapToInput(request api.TripData) trip.Input {
-	return trip.Input{
+func toInput(request api.TripData) applicationTrip.Input {
+	return applicationTrip.Input{
 		UserID:   request.UserId,
 		DriverID: request.DriverId,
 		Price:    request.Price,
 
-		StartPoint: trip.Coordinates(request.StartPoint),
-		EndPoint:   trip.Coordinates(request.EndPoint),
+		StartPoint: applicationTrip.Coordinates(request.StartPoint),
+		EndPoint:   applicationTrip.Coordinates(request.EndPoint),
 	}
 }
 
-func MapToResponse(output trip.Output) api.Trip {
+func toResponse(output *trip.Trip) api.Trip {
 	return api.Trip{
 		Id:       output.ID,
 		UserId:   output.UserID,
@@ -31,4 +32,31 @@ func MapToResponse(output trip.Output) api.Trip {
 		FinishedAt:     output.FinishedAt,
 		LastPositionAt: output.LastPositionAt,
 	}
+}
+
+func toPositionInput(request api.PositionData) applicationTrip.PositionInput {
+	return applicationTrip.PositionInput{
+		Coords:     applicationTrip.Coordinates(request.Coordinates),
+		RecordedAt: request.RecordedAt,
+	}
+}
+
+func toPositionResponse(position *trip.Position) api.TripPosition {
+	return api.TripPosition{
+		Id:          position.ID,
+		TripId:      position.TripID,
+		Coordinates: api.Coordinates(position.Coordinates),
+		RecordedAt:  position.RecordedAt,
+	}
+}
+
+func toPositionsResponse(positions []trip.Position) api.TripPositionsResponse {
+	response := api.TripPositionsResponse{
+		Positions: make([]api.TripPosition, 0, len(positions)),
+	}
+	for i := range positions {
+		response.Positions = append(response.Positions, toPositionResponse(&positions[i]))
+	}
+
+	return response
 }

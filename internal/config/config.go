@@ -28,7 +28,17 @@ type HTTPConfig struct {
 	IdleTimeout       time.Duration `env:"HTTP_IDLE_TIMEOUT" validate:"required"`
 }
 
+type PositionConfig struct {
+	CheckInterval  time.Duration `env:"POSITION_CHECK_INTERVAL" envDefault:"30s" validate:"gt=0"`
+	StaleAfter     time.Duration `env:"POSITION_STALE_AFTER" envDefault:"60s" validate:"gt=0"`
+	Workers        int           `env:"POSITION_WORKERS" envDefault:"4" validate:"gt=0"`
+	QueueSize      int           `env:"POSITION_QUEUE_SIZE" envDefault:"100" validate:"gt=0"`
+	PushURL        string        `env:"PUSH_HTTP_URL" validate:"required,http_url"`
+	RequestTimeout time.Duration `env:"PUSH_REQUEST_TIMEOUT" envDefault:"1s" validate:"gt=0"`
+}
+
 type Config struct {
+	Positions       PositionConfig
 	DB              DBConfig      `validate:"required"`
 	HTTP            HTTPConfig    `validate:"required"`
 	LogLevel        string        `env:"LOG_LEVEL" validate:"required,oneof=debug warn info error"`

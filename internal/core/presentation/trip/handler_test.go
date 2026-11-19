@@ -32,7 +32,7 @@ const validBody = `{
 	"end_point": {"latitude": 59.9290, "longitude": 30.3626}
 }`
 
-func TestCreateTrip_No_CorrectData(t *testing.T) {
+func TestCreateTrip_Success(t *testing.T) {
 	handler, service := newTestHandler(t)
 
 	service.EXPECT().Create(gomock.Any(), expectedInput()).Return(handlerOutput(), nil)
@@ -47,7 +47,7 @@ func TestCreateTrip_No_CorrectData(t *testing.T) {
 	}
 }
 
-func TestCreateTrip_No_LocationWithTripId(t *testing.T) {
+func TestCreateTrip_Success_LocationHeader(t *testing.T) {
 	handler, service := newTestHandler(t)
 
 	service.EXPECT().Create(gomock.Any(), expectedInput()).Return(handlerOutput(), nil)
@@ -63,7 +63,7 @@ func TestCreateTrip_No_LocationWithTripId(t *testing.T) {
 	}
 }
 
-func TestCreateTrip_CodeInvalidRequest_IncorrectBody(t *testing.T) {
+func TestCreateTrip_InvalidRequest_IncorrectBody(t *testing.T) {
 	handler, service := newTestHandler(t)
 
 	service.EXPECT().Create(gomock.Any(), gomock.Any()).Times(0)
@@ -76,12 +76,12 @@ func TestCreateTrip_CodeInvalidRequest_IncorrectBody(t *testing.T) {
 	assertProblem(t, rec, http.StatusBadRequest, errs.InvalidRequest)
 }
 
-func TestCreateTrip_CodeDriverBusy_BusyDriver(t *testing.T) {
+func TestCreateTrip_DriverBusy_BusyDriver(t *testing.T) {
 	handler, service := newTestHandler(t)
 
 	service.EXPECT().
 		Create(gomock.Any(), expectedInput()).
-		Return(applicationTrip.Output{}, errs.NewServiceError(trip.CodeDriverBusy, "Driver already has an active trip"))
+		Return(nil, errs.New(trip.CodeDriverBusy, "Driver already has an active trips", nil))
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/trips", strings.NewReader(validBody))
@@ -91,12 +91,12 @@ func TestCreateTrip_CodeDriverBusy_BusyDriver(t *testing.T) {
 	assertProblem(t, rec, http.StatusConflict, trip.CodeDriverBusy)
 }
 
-func TestCreateTrip_CodeInternalError_DetailNotExposed(t *testing.T) {
+func TestCreateTrip_InternalError_DetailNotExposed(t *testing.T) {
 	handler, service := newTestHandler(t)
 
 	service.EXPECT().
 		Create(gomock.Any(), expectedInput()).
-		Return(applicationTrip.Output{}, errs.NewInternalServiceError(errors.New("insert failed: password=secret")))
+		Return(nil, errs.NewInternal(errors.New("insert failed: password=secret")))
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/trips", strings.NewReader(validBody))
@@ -108,7 +108,7 @@ func TestCreateTrip_CodeInternalError_DetailNotExposed(t *testing.T) {
 	}
 }
 
-func TestGetTrip_No_CorrectId(t *testing.T) {
+func TestGetTrip_Success(t *testing.T) {
 	handler, service := newTestHandler(t)
 
 	service.EXPECT().Get(gomock.Any(), handlerTripID).Return(handlerOutput(), nil)
@@ -123,12 +123,12 @@ func TestGetTrip_No_CorrectId(t *testing.T) {
 	}
 }
 
-func TestGetTrip_CodeTripNotFound_UnknownId(t *testing.T) {
+func TestGetTrip_TripNotFound_UnknownTripID(t *testing.T) {
 	handler, service := newTestHandler(t)
 
 	service.EXPECT().
 		Get(gomock.Any(), handlerTripID).
-		Return(applicationTrip.Output{}, errs.NewServiceError(trip.CodeTripNotFound, "Trip was not found"))
+		Return(nil, errs.New(trip.CodeTripNotFound, "Trip was not found", nil))
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/trips/"+handlerTripID.String(), nil)
@@ -138,7 +138,7 @@ func TestGetTrip_CodeTripNotFound_UnknownId(t *testing.T) {
 	assertProblem(t, rec, http.StatusNotFound, trip.CodeTripNotFound)
 }
 
-func TestFinishTrip_No_CorrectId(t *testing.T) {
+func TestFinishTrip_Success(t *testing.T) {
 	handler, service := newTestHandler(t)
 
 	service.EXPECT().Finish(gomock.Any(), handlerTripID).Return(handlerFinishedOutput(), nil)
@@ -153,12 +153,12 @@ func TestFinishTrip_No_CorrectId(t *testing.T) {
 	}
 }
 
-func TestFinishTrip_CodeTripCompleted_AlreadyFinished(t *testing.T) {
+func TestFinishTrip_TripCompleted_AlreadyFinished(t *testing.T) {
 	handler, service := newTestHandler(t)
 
 	service.EXPECT().
 		Finish(gomock.Any(), handlerTripID).
-		Return(applicationTrip.Output{}, errs.NewServiceError(trip.CodeTripAlreadyCompleted, "Operation is not allowed"))
+		Return(nil, errs.New(trip.CodeTripAlreadyCompleted, "Operation is not allowed", nil))
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/trips/"+handlerTripID.String()+"/finish", nil)
@@ -168,12 +168,12 @@ func TestFinishTrip_CodeTripCompleted_AlreadyFinished(t *testing.T) {
 	assertProblem(t, rec, http.StatusConflict, trip.CodeTripAlreadyCompleted)
 }
 
-func TestFinishTrip_CodeTripNotFound_UnknownId(t *testing.T) {
+func TestFinishTrip_TripNotFound_UnknownTripID(t *testing.T) {
 	handler, service := newTestHandler(t)
 
 	service.EXPECT().
 		Finish(gomock.Any(), handlerTripID).
-		Return(applicationTrip.Output{}, errs.NewServiceError(trip.CodeTripNotFound, "Trip was not found"))
+		Return(nil, errs.New(trip.CodeTripNotFound, "Trip was not found", nil))
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/trips/"+handlerTripID.String()+"/finish", nil)
@@ -190,7 +190,7 @@ func newTestHandler(t *testing.T) (*Handler, *MockService) {
 
 	service := NewMockService(ctrl)
 
-	return NewHandler(service, NewMockPinger(ctrl), slog.New(slog.DiscardHandler)), service
+	return NewHandler(service, NewMockPinger(ctrl), slog.New(slog.DiscardHandler), func(uuid.UUID) {}), service
 }
 
 func expectedInput() applicationTrip.Input {
@@ -209,34 +209,26 @@ func expectedInput() applicationTrip.Input {
 	}
 }
 
-func handlerOutput() applicationTrip.Output {
-	return applicationTrip.Output{
+func handlerOutput() *trip.Trip {
+	return &trip.Trip{
 		ID:         handlerTripID,
 		UserID:     handlerUserID,
 		DriverID:   handlerDriverID,
 		Price:      1450,
-		Status:     applicationTrip.Status(trip.StatusActive),
-		StartPoint: expectedInput().StartPoint,
-		EndPoint:   expectedInput().EndPoint,
+		Status:     trip.StatusActive,
+		StartPoint: trip.Coordinates(expectedInput().StartPoint),
+		EndPoint:   trip.Coordinates(expectedInput().EndPoint),
 	}
 }
 
-func handlerFinishedOutput() applicationTrip.Output {
+func handlerFinishedOutput() *trip.Trip {
 	out := handlerOutput()
-	out.Status = applicationTrip.Status(trip.StatusCompleted)
+	out.Status = trip.StatusCompleted
 
 	return out
 }
 
-func decodeJSON(t *testing.T, rec *httptest.ResponseRecorder, target any) {
-	t.Helper()
-
-	if err := json.NewDecoder(rec.Body).Decode(target); err != nil {
-		t.Fatalf("тело не является JSON: %v", err)
-	}
-}
-
-func assertProblem(t *testing.T, rec *httptest.ResponseRecorder, wantStatus int, wantCode errs.ErrorCode) {
+func assertProblem(t *testing.T, rec *httptest.ResponseRecorder, wantStatus int, wantCode errs.Code) {
 	t.Helper()
 
 	if rec.Code != wantStatus {

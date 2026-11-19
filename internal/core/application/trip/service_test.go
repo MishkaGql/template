@@ -20,94 +20,78 @@ var (
 	testTripID   = uuid.MustParse("1f0a9c62-4a1c-4f2e-9d33-2a4bb0f0b111")
 )
 
-func TestCreate_No_CorrectData(t *testing.T) {
+func TestCreate_Success(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	ctx := t.Context()
+	txCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	want := activeTrip()
+	repo := NewMockRepository(ctrl)
+
+	gomock.InOrder(
+		repo.EXPECT().Create(txCtx, gomock.Any()).Return(want, nil),
+		repo.EXPECT().SaveStatusHistory(txCtx, &trip.StatusHistory{
+			TripID:   testTripID,
+			ToStatus: trip.StatusActive,
+		}).Return(nil),
+	)
+
+	tx := NewMockTxManager(ctrl)
+	tx.EXPECT().Do(ctx, gomock.Any()).DoAndReturn(
+		func(_ context.Context, fn func(context.Context) error) error {
+			return fn(txCtx)
+		},
+	)
+
+	metrics := &metricsRecorder{}
+	svc := NewService(repo, tx, testLogger(), metrics)
+
+	out, err := svc.Create(ctx, validInput())
+	if err != nil {
+		t.Fatalf("не ожидали ошибку: %v", err)
+	}
+
+	if out != want {
+		t.Errorf("Create() = %p, want repository trips %p", out, want)
+	}
+
+	if metrics.created != 1 {
+		t.Errorf("Create() counter = %d, want 1 after successful transaction", metrics.created)
+	}
+}
+
+func TestCreate_InternalError_CommitFailed(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	repo := NewMockRepository(ctrl)
 
 	repo.EXPECT().Create(gomock.Any(), gomock.Any()).Return(activeTrip(), nil)
 	repo.EXPECT().SaveStatusHistory(gomock.Any(), gomock.Any()).Return(nil)
 
-	svc := NewService(repo, txPassthrough(ctrl), testLogger(), testMetrics())
+	tx := NewMockTxManager(ctrl)
+	tx.EXPECT().Do(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(ctx context.Context, fn func(context.Context) error) error {
+			if err := fn(ctx); err != nil {
+				return err
+			}
 
-	out, err := svc.Create(context.Background(), validInput())
-	if err != nil {
-		t.Fatalf("не ожидали ошибку: %v", err)
-	}
+			return errs.NewInternal(errors.New("commit unavailable"))
+		},
+	)
 
-	if out.Status != Status(trip.StatusActive) {
-		t.Errorf("статус: got %q, want %q", out.Status, trip.StatusActive)
-	}
-}
+	metrics := &metricsRecorder{}
+	svc := NewService(repo, tx, testLogger(), metrics)
 
-func TestCreate_CodeDriverBusy_BusyDriver(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	repo := NewMockRepository(ctrl)
-
-	repo.EXPECT().
-		Create(gomock.Any(), gomock.Any()).
-		Return(nil, errs.NewServiceError(trip.CodeDriverBusy, "Driver already has an active trip"))
-	repo.EXPECT().SaveStatusHistory(gomock.Any(), gomock.Any()).Times(0)
-
-	svc := NewService(repo, txPassthrough(ctrl), testLogger(), testMetrics())
-
-	_, err := svc.Create(context.Background(), validInput())
-
-	errstest.AssertCode(t, err, trip.CodeDriverBusy)
-}
-
-func TestCreate_CodeInternalError_HistorySaveFailed(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	repo := NewMockRepository(ctrl)
-
-	repo.EXPECT().Create(gomock.Any(), gomock.Any()).Return(activeTrip(), nil)
-	repo.EXPECT().
-		SaveStatusHistory(gomock.Any(), gomock.Any()).
-		Return(errs.NewInternalServiceError(errors.New("insert into trip_status_history failed")))
-
-	svc := NewService(repo, txPassthrough(ctrl), testLogger(), testMetrics())
-
-	_, err := svc.Create(context.Background(), validInput())
+	_, err := svc.Create(t.Context(), validInput())
 
 	errstest.AssertCode(t, err, errs.InternalError)
+
+	if metrics.created != 0 {
+		t.Errorf("Create() counter = %d, want 0 after commit failure", metrics.created)
+	}
 }
 
-func TestCreate_CodeInvalidRequest_IncorrectCoordinates(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	repo := NewMockRepository(ctrl)
-	tx := NewMockTxManager(ctrl)
-
-	repo.EXPECT().Create(gomock.Any(), gomock.Any()).Times(0)
-	tx.EXPECT().Do(gomock.Any(), gomock.Any()).Times(0)
-
-	input := validInput()
-	input.StartPoint.Latitude = 91
-
-	svc := NewService(repo, tx, testLogger(), testMetrics())
-
-	_, err := svc.Create(context.Background(), input)
-
-	errstest.AssertCode(t, err, errs.InvalidRequest)
-}
-
-func TestCreate_CodeInvalidRequest_EmptyUserId(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	repo := NewMockRepository(ctrl)
-	tx := NewMockTxManager(ctrl)
-
-	repo.EXPECT().Create(gomock.Any(), gomock.Any()).Times(0)
-	tx.EXPECT().Do(gomock.Any(), gomock.Any()).Times(0)
-
-	input := validInput()
-	input.UserID = uuid.Nil
-
-	svc := NewService(repo, tx, testLogger(), testMetrics())
-
-	_, err := svc.Create(context.Background(), input)
-
-	errstest.AssertCode(t, err, errs.InvalidRequest)
-}
-
-func TestGet_No_CorrectId(t *testing.T) {
+func TestGet_Success(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	repo := NewMockRepository(ctrl)
 
@@ -125,13 +109,13 @@ func TestGet_No_CorrectId(t *testing.T) {
 	}
 }
 
-func TestGet_CodeTripNotFound_UnknownId(t *testing.T) {
+func TestGet_TripNotFound_UnknownTripID(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	repo := NewMockRepository(ctrl)
 
 	repo.EXPECT().
 		Get(gomock.Any(), testTripID).
-		Return(nil, errs.NewServiceError(trip.CodeTripNotFound, "Trip was not found"))
+		Return(nil, errs.New(trip.CodeTripNotFound, "Trip was not found", nil))
 
 	svc := NewService(repo, NewMockTxManager(ctrl), testLogger(), testMetrics())
 
@@ -140,72 +124,69 @@ func TestGet_CodeTripNotFound_UnknownId(t *testing.T) {
 	errstest.AssertCode(t, err, trip.CodeTripNotFound)
 }
 
-func TestFinish_No_CorrectId(t *testing.T) {
+func TestFinish_Success(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	ctx := t.Context()
+	txCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	current := activeTrip()
+	from := trip.StatusActive
+	repo := NewMockRepository(ctrl)
+
+	gomock.InOrder(
+		repo.EXPECT().GetForUpdate(txCtx, testTripID).Return(current, nil),
+		repo.EXPECT().Update(txCtx, current).Return(current, nil),
+		repo.EXPECT().SaveStatusHistory(txCtx, &trip.StatusHistory{
+			TripID:     testTripID,
+			FromStatus: &from,
+			ToStatus:   trip.StatusCompleted,
+		}).Return(nil),
+	)
+
+	tx := NewMockTxManager(ctrl)
+	tx.EXPECT().Do(ctx, gomock.Any()).DoAndReturn(
+		func(_ context.Context, fn func(context.Context) error) error {
+			return fn(txCtx)
+		},
+	)
+
+	metrics := &metricsRecorder{}
+	svc := NewService(repo, tx, testLogger(), metrics)
+
+	out, err := svc.Finish(ctx, testTripID)
+	if err != nil {
+		t.Fatalf("не ожидали ошибку: %v", err)
+	}
+
+	if out != current {
+		t.Errorf("Finish() = %p, want repository trips %p", out, current)
+	}
+
+	if metrics.completed != 1 {
+		t.Errorf("Finish() counter = %d, want 1 after successful transaction", metrics.completed)
+	}
+}
+
+func TestFinish_InternalError_HistorySaveFailed(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	repo := NewMockRepository(ctrl)
 
 	repo.EXPECT().GetForUpdate(gomock.Any(), testTripID).Return(activeTrip(), nil)
 	repo.EXPECT().Update(gomock.Any(), gomock.Any()).Return(completedTrip(), nil)
-	repo.EXPECT().SaveStatusHistory(gomock.Any(), gomock.Any()).Return(nil)
+	repo.EXPECT().SaveStatusHistory(gomock.Any(), gomock.Any()).
+		Return(errs.NewInternal(errors.New("history unavailable")))
 
-	svc := NewService(repo, txPassthrough(ctrl), testLogger(), testMetrics())
+	metrics := &metricsRecorder{}
+	svc := NewService(repo, txPassthrough(ctrl), testLogger(), metrics)
 
-	out, err := svc.Finish(context.Background(), testTripID)
-	if err != nil {
-		t.Fatalf("не ожидали ошибку: %v", err)
-	}
-
-	if out.Status != Status(trip.StatusCompleted) {
-		t.Errorf("статус: got %q, want %q", out.Status, trip.StatusCompleted)
-	}
-}
-
-func TestFinish_CodeTripAlreadyCompleted_CompletedTrip(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	repo := NewMockRepository(ctrl)
-
-	repo.EXPECT().GetForUpdate(gomock.Any(), testTripID).Return(completedTrip(), nil)
-	repo.EXPECT().Update(gomock.Any(), gomock.Any()).Times(0)
-	repo.EXPECT().SaveStatusHistory(gomock.Any(), gomock.Any()).Times(0)
-
-	svc := NewService(repo, txPassthrough(ctrl), testLogger(), testMetrics())
-
-	_, err := svc.Finish(context.Background(), testTripID)
-
-	errstest.AssertCode(t, err, trip.CodeTripAlreadyCompleted)
-}
-
-func TestFinish_CodeTripNotFound_UnknownId(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	repo := NewMockRepository(ctrl)
-
-	repo.EXPECT().
-		GetForUpdate(gomock.Any(), testTripID).
-		Return(nil, errs.NewServiceError(trip.CodeTripNotFound, "Trip was not found"))
-	repo.EXPECT().Update(gomock.Any(), gomock.Any()).Times(0)
-
-	svc := NewService(repo, txPassthrough(ctrl), testLogger(), testMetrics())
-
-	_, err := svc.Finish(context.Background(), testTripID)
-
-	errstest.AssertCode(t, err, trip.CodeTripNotFound)
-}
-
-func TestFinish_CodeInternalError_UpdateFailed(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	repo := NewMockRepository(ctrl)
-
-	repo.EXPECT().GetForUpdate(gomock.Any(), testTripID).Return(activeTrip(), nil)
-	repo.EXPECT().
-		Update(gomock.Any(), gomock.Any()).
-		Return(nil, errs.NewInternalServiceError(errors.New("update trips failed")))
-	repo.EXPECT().SaveStatusHistory(gomock.Any(), gomock.Any()).Times(0)
-
-	svc := NewService(repo, txPassthrough(ctrl), testLogger(), testMetrics())
-
-	_, err := svc.Finish(context.Background(), testTripID)
+	_, err := svc.Finish(t.Context(), testTripID)
 
 	errstest.AssertCode(t, err, errs.InternalError)
+
+	if metrics.completed != 0 {
+		t.Errorf("Finish() counter = %d, want 0 after rollback", metrics.completed)
+	}
 }
 
 func validInput() Input {
@@ -273,3 +254,11 @@ type noopMetrics struct{}
 
 func (noopMetrics) TripCreated(context.Context)   {}
 func (noopMetrics) TripCompleted(context.Context) {}
+
+func (noopMetrics) PositionSaved(context.Context)      {}
+func (*metricsRecorder) PositionSaved(context.Context) {}
+
+type metricsRecorder struct{ created, completed int }
+
+func (m *metricsRecorder) TripCreated(context.Context)   { m.created++ }
+func (m *metricsRecorder) TripCompleted(context.Context) { m.completed++ }

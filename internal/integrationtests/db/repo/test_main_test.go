@@ -1,5 +1,3 @@
-//go:build integration
-
 package repo
 
 import (
@@ -10,12 +8,11 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/testcontainers/testcontainers-go"
 
-	"github.com/MishkaGql/template/internal/tests/db/dbtest"
+	"github.com/MishkaGql/template/internal/integrationtests/db/dbtest"
 )
 
-const startContainerTimeout = 5 * time.Second
+const startContainerTimeout = time.Minute
 
 var pool *pgxpool.Pool
 
@@ -34,8 +31,8 @@ func runTests(m *testing.M) int {
 	}
 
 	defer func() {
-		if termErr := testcontainers.TerminateContainer(pg.Container); termErr != nil {
-			fmt.Fprintf(os.Stderr, "terminate postgres container: %v\n", termErr)
+		if err := dbtest.Terminate(pg.Container); err != nil {
+			fmt.Fprintf(os.Stderr, "%v\n", err)
 		}
 	}()
 
@@ -44,6 +41,7 @@ func runTests(m *testing.M) int {
 		fmt.Fprintf(os.Stderr, "create pool: %v\n", err)
 		return 1
 	}
+
 	defer pool.Close()
 
 	return m.Run()

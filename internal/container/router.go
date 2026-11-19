@@ -6,11 +6,11 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/go-chi/chi/v5"
 	nethttpmiddleware "github.com/oapi-codegen/nethttp-middleware"
 
 	"github.com/MishkaGql/template/api"
+	"github.com/MishkaGql/template/contracts/openapi"
 	"github.com/MishkaGql/template/internal/core/presentation/middleware"
 	"github.com/MishkaGql/template/internal/core/presentation/problem"
 	"github.com/MishkaGql/template/internal/core/presentation/trip"
@@ -18,14 +18,10 @@ import (
 	"github.com/MishkaGql/template/internal/observability"
 )
 
-const openAPISpecPath = "contracts/openapi/trip-service.openapi.yaml"
-
 func NewRouter(h *trip.Handler, logger *slog.Logger, metrics middleware.ActiveRequests) (http.Handler, error) {
-	loader := openapi3.NewLoader()
-
-	spec, err := loader.LoadFromFile(openAPISpecPath)
+	spec, err := openapi.Load()
 	if err != nil {
-		return nil, fmt.Errorf("load openapi spec: %w", err)
+		return nil, fmt.Errorf("load push-service.openapi.yaml spec: %w", err)
 	}
 	spec.Servers = nil
 
@@ -37,7 +33,7 @@ func NewRouter(h *trip.Handler, logger *slog.Logger, metrics middleware.ActiveRe
 			_ *http.Request,
 			_ nethttpmiddleware.ErrorHandlerOpts,
 		) {
-			problem.Send(ctx, logger, w, errs.NewValidationServiceError())
+			problem.Send(ctx, logger, w, errs.NewValidation())
 		},
 	})
 
@@ -47,7 +43,7 @@ func NewRouter(h *trip.Handler, logger *slog.Logger, metrics middleware.ActiveRe
 	handler := api.HandlerWithOptions(h, api.ChiServerOptions{
 		BaseRouter: mux,
 		ErrorHandlerFunc: func(w http.ResponseWriter, r *http.Request, err error) {
-			problem.Send(r.Context(), logger, w, errs.NewValidationServiceError())
+			problem.Send(r.Context(), logger, w, errs.NewValidation())
 		},
 	})
 

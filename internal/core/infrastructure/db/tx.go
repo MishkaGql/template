@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -12,7 +13,7 @@ import (
 
 type ctxKey struct{}
 
-var txKey ctxKey
+const rollbackTimeout = 5 * time.Second
 
 type PgxTxManager struct {
 	db *pgxpool.Pool
@@ -25,43 +26,39 @@ func NewPgxTxManager(pool *pgxpool.Pool) *PgxTxManager {
 }
 
 func (m *PgxTxManager) Do(ctx context.Context, fn func(ctx context.Context) error) (err error) {
-	_, ok := getTx(ctx)
+	_, ok := ExtractTx(ctx)
 	if ok {
 		return fn(ctx)
 	}
 
 	tx, err := m.db.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
-		return errs.NewInternalServiceError(err)
+		return errs.NewInternal(err)
 	}
 
 	defer func() {
-		rollbackErr := tx.Rollback(context.WithoutCancel(ctx))
+		rollbackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), rollbackTimeout)
+		defer cancel()
+
+		rollbackErr := tx.Rollback(rollbackCtx)
 		if rollbackErr != nil && !errors.Is(rollbackErr, pgx.ErrTxClosed) {
-			if err == nil {
-				err = errs.NewInternalServiceError(rollbackErr)
-				return
-			}
-			err = errors.Join(err, rollbackErr)
+			err = errs.NewInternal(errors.Join(err, rollbackErr))
 		}
 	}()
 
-	txContext := context.WithValue(ctx, txKey, tx)
+	txContext := context.WithValue(ctx, ctxKey{}, tx)
 	if err = fn(txContext); err != nil {
 		return err
 	}
 
 	if err = tx.Commit(ctx); err != nil {
-		return errs.NewInternalServiceError(err)
+		return errs.NewInternal(err)
 	}
 
 	return nil
 }
 
-func getTx(ctx context.Context) (pgx.Tx, bool) {
-	tx, ok := ctx.Value(txKey).(pgx.Tx)
-	if ok {
-		return tx, true
-	}
-	return nil, false
+func ExtractTx(ctx context.Context) (pgx.Tx, bool) {
+	tx, ok := ctx.Value(ctxKey{}).(pgx.Tx)
+	return tx, ok
 }

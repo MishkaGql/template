@@ -1,0 +1,7 @@
+package: pushclient
+
+generate:
+  models: true
+  client: true
+
+output: pushclient/client.gen.go

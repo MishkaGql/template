@@ -22,7 +22,7 @@ type definition struct {
 	status int32
 }
 
-var definitionByCode = map[errs.ErrorCode]definition{
+var definitionByCode = map[errs.Code]definition{
 	errs.InvalidRequest:           {title: "Invalid request", status: http.StatusBadRequest},
 	errs.InternalError:            {title: "Internal Server Error", status: http.StatusInternalServerError},
 	trip.CodeDriverBusy:           {title: "Driver busy", status: http.StatusConflict},
@@ -32,38 +32,38 @@ var definitionByCode = map[errs.ErrorCode]definition{
 }
 
 func Send(ctx context.Context, logger *slog.Logger, w http.ResponseWriter, err error) {
-	absErr, ok := errs.AsAbstractError(err)
+	publicErr, ok := errs.AsError(err)
+
 	if !ok {
-		absErr = errs.NewInternalServiceError(err)
+		publicErr = errs.NewInternal(nil)
 	}
 
-	problem := BuildProblem(ctx, absErr)
-	logInternal(ctx, logger, err, absErr)
-
+	problem := buildProblem(ctx, publicErr)
+	if problem.Status == http.StatusInternalServerError {
+		tracelog.WithTrace(ctx, logger).ErrorContext(ctx, "request failed", "error", err)
+	}
 	httpsender.SendResponse(w, httpsender.MIMEProblemJSON, int(problem.Status), problem)
 }
 
-func BuildProblem(ctx context.Context, err errs.AbstractError) api.Problem {
-	code := err.Code()
-	def := definitionOf(code)
+func buildProblem(ctx context.Context, publicErr *errs.Error) api.Problem {
+	_, ok := definitionByCode[publicErr.Code()]
 
+	if !ok {
+		publicErr = errs.NewInternal(nil)
+	}
+
+	return newProblem(ctx, publicErr, definitionByCode[publicErr.Code()])
+}
+
+func newProblem(ctx context.Context, err *errs.Error, def definition) api.Problem {
 	return api.Problem{
 		Title:    def.title,
 		Detail:   err.Message(),
-		Code:     string(code),
-		Type:     baseURL + strings.ReplaceAll(string(code), "_", "-"),
+		Code:     string(err.Code()),
+		Type:     baseURL + strings.ReplaceAll(string(err.Code()), "_", "-"),
 		Status:   def.status,
 		Instance: instanceOf(ctx),
 	}
-}
-
-func definitionOf(code errs.ErrorCode) definition {
-	def, ok := definitionByCode[code]
-	if !ok {
-		def = definitionByCode[errs.InternalError]
-	}
-
-	return def
 }
 
 func instanceOf(ctx context.Context) *string {
@@ -75,12 +75,4 @@ func instanceOf(ctx context.Context) *string {
 	instance := baseURL + "instances/" + spanCtx.TraceID().String()
 
 	return &instance
-}
-
-func logInternal(ctx context.Context, logger *slog.Logger, cause error, err errs.AbstractError) {
-	if logger == nil || definitionOf(err.Code()).status < http.StatusInternalServerError {
-		return
-	}
-
-	tracelog.WithTrace(ctx, logger).Error("internal error", "error", cause)
 }

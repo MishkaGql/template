@@ -2,6 +2,7 @@ package observability
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -15,7 +16,7 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
-const ServiceName = "trip-service"
+const ServiceName = "trips-service"
 
 type Provider struct {
 	traces  *sdktrace.TracerProvider
@@ -70,13 +71,5 @@ func (p *Provider) MeterProvider() *metric.MeterProvider {
 }
 
 func (p *Provider) Shutdown(ctx context.Context) error {
-	if err := p.traces.Shutdown(ctx); err != nil {
-		return fmt.Errorf("shutdown tracer provider: %w", err)
-	}
-
-	if err := p.metrics.Shutdown(ctx); err != nil {
-		return fmt.Errorf("shutdown meter provider: %w", err)
-	}
-
-	return nil
+	return errors.Join(p.traces.Shutdown(ctx), p.metrics.Shutdown(ctx))
 }

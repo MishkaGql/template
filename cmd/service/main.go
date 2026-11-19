@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -14,49 +15,25 @@ import (
 
 	"github.com/MishkaGql/template/internal/config"
 	"github.com/MishkaGql/template/internal/container"
-	"github.com/MishkaGql/template/internal/observability"
 )
 
 func main() {
 	validate := validator.New(validator.WithRequiredStructEnabled())
 	cfg := config.MustLoad(validate)
 
-	logger := observability.NewLogger(cfg.LogLevel)
-
-	if err := run(cfg, logger); err != nil {
-		logger.Error("server stopped with error", "error", err)
+	if err := run(cfg); err != nil {
+		slog.Error("server stopped with error", "error", err)
 		os.Exit(1)
 	}
 
-	logger.Info("server stopped")
+	slog.Info("server stopped")
 }
 
-func run(cfg *config.Config, logger *slog.Logger) error {
+func run(cfg *config.Config) (err error) {
 	ctx := context.Background()
 
-	otelProvider, err := observability.New(ctx, observability.ServiceName)
+	c, err := container.New(ctx, cfg)
 	if err != nil {
-		return err
-	}
-
-	defer func() {
-		if shutdownErr := otelProvider.Shutdown(context.WithoutCancel(ctx)); shutdownErr != nil {
-			logger.Error("otel shutdown failed", "error", shutdownErr)
-		}
-	}()
-
-	metrics, err := observability.NewMetrics(otelProvider.MeterProvider())
-	if err != nil {
-		return err
-	}
-
-	c, err := container.New(ctx, cfg, logger, metrics, otelProvider.MeterProvider())
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-
-	if err := c.Pinger.Ping(ctx); err != nil {
 		return err
 	}
 
@@ -71,33 +48,41 @@ func run(cfg *config.Config, logger *slog.Logger) error {
 
 	listener, err := net.Listen("tcp", server.Addr)
 	if err != nil {
-		return err
+		closeCtx, cancel := context.WithTimeout(ctx, cfg.ShutdownTimeout)
+		defer cancel()
+		return errors.Join(fmt.Errorf("listen: %w", err), c.Close(closeCtx))
 	}
 
 	notifyCtx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	go func() {
-		logger.Info("server started", "addr", server.Addr)
+	c.Positions.Start(ctx)
 
-		if serveErr := server.Serve(listener); !errors.Is(serveErr, http.ErrServerClosed) {
-			logger.Error("listen failed", "error", serveErr)
-			stop()
+	serveErrors := make(chan error, 1)
+	go func() {
+		slog.Info("server started", "addr", server.Addr)
+		if err := server.Serve(listener); !errors.Is(err, http.ErrServerClosed) {
+			serveErrors <- err
 		}
 	}()
 
-	<-notifyCtx.Done()
+	var serveErr error
 
-	shutdownCtx, cancelTimeout := context.WithTimeout(ctx, cfg.ShutdownTimeout)
-	defer cancelTimeout()
-
-	if err := server.Shutdown(shutdownCtx); err != nil {
-		if closeErr := server.Close(); closeErr != nil {
-			return closeErr
-		}
-
-		return err
+	select {
+	case <-notifyCtx.Done():
+		slog.Info("server received shutdown signal")
+	case err := <-serveErrors:
+		serveErr = fmt.Errorf("serve http: %w", err)
 	}
 
-	return nil
+	shutdownCtx, cancelTimeout := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
+	defer cancelTimeout()
+
+	httpErr := server.Shutdown(shutdownCtx)
+	if httpErr != nil {
+		slog.Warn("forcing HTTP shutdown", "error", httpErr)
+		httpErr = errors.Join(httpErr, server.Close())
+	}
+	poolErr := c.Positions.Stop(shutdownCtx)
+	return errors.Join(serveErr, httpErr, poolErr, c.Close(shutdownCtx))
 }

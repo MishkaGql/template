@@ -19,8 +19,18 @@ type TripEntity struct {
 	Status         string             `db:"status"`
 	StartedAt      time.Time          `db:"started_at"`
 	FinishedAt     pgtype.Timestamptz `db:"finished_at"`
+	LastPositionAt pgtype.Timestamptz `db:"last_position_at"`
 	CreatedAt      time.Time          `db:"created_at"`
 	UpdatedAt      time.Time          `db:"updated_at"`
+}
+
+type PositionEntity struct {
+	ID         int64     `db:"id"`
+	TripID     uuid.UUID `db:"trip_id"`
+	Latitude   float64   `db:"latitude"`
+	Longitude  float64   `db:"longitude"`
+	RecordedAt time.Time `db:"recorded_at"`
+	CreatedAt  time.Time `db:"created_at"`
 }
 
 type StatusHistoryEntity struct {

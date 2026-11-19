@@ -10,6 +10,7 @@ import (
 const instrumentationName = "github.com/MishkaGql/template"
 
 type Metrics struct {
+	positionsSaved metric.Int64Counter
 	tripsCreated   metric.Int64Counter
 	tripsCompleted metric.Int64Counter
 	activeRequests metric.Int64UpDownCounter
@@ -42,12 +43,19 @@ func NewMetrics(provider metric.MeterProvider) (*Metrics, error) {
 		return nil, err
 	}
 
+	saved, err := meter.Int64Counter("tripgo.positions.saved")
+	if err != nil {
+		return nil, err
+	}
 	return &Metrics{
+		positionsSaved: saved,
 		tripsCreated:   created,
 		tripsCompleted: completed,
 		activeRequests: active,
 	}, nil
 }
+
+func (m *Metrics) PositionSaved(ctx context.Context) { m.positionsSaved.Add(ctx, 1) }
 
 func (m *Metrics) TripCreated(ctx context.Context) {
 	m.tripsCreated.Add(ctx, 1)

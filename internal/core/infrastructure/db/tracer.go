@@ -35,12 +35,12 @@ func newCollectionTracer(mp metric.MeterProvider) *collectionTracer {
 	}
 
 	duration, err := mp.Meter(dbInstrumentationName).Float64Histogram(
-		"db.client.operation.duration",
+		"db.pushclient.operation.duration",
 		metric.WithUnit("s"),
 		metric.WithDescription("Длительность запроса в БД"),
 	)
 	if err != nil {
-		duration, _ = noop.NewMeterProvider().Meter(dbInstrumentationName).Float64Histogram("db.client.operation.duration")
+		duration, _ = noop.NewMeterProvider().Meter(dbInstrumentationName).Float64Histogram("db.pushclient.operation.duration")
 	}
 
 	return &collectionTracer{

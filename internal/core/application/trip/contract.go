@@ -23,5 +23,8 @@ type (
 		GetForUpdate(ctx context.Context, id uuid.UUID) (*trip.Trip, error)
 
 		SaveStatusHistory(ctx context.Context, h *trip.StatusHistory) error
+
+		CreateTripPosition(ctx context.Context, position *trip.Position) (*trip.Position, error)
+		ListTripPositions(ctx context.Context, id uuid.UUID) ([]trip.Position, error)
 	}
 )

@@ -95,6 +95,21 @@ func (mr *MockRepositoryMockRecorder) Create(ctx, t any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Create", reflect.TypeOf((*MockRepository)(nil).Create), ctx, t)
 }
 
+// CreateTripPosition mocks base method.
+func (m *MockRepository) CreateTripPosition(ctx context.Context, position *trip.Position) (*trip.Position, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CreateTripPosition", ctx, position)
+	ret0, _ := ret[0].(*trip.Position)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CreateTripPosition indicates an expected call of CreateTripPosition.
+func (mr *MockRepositoryMockRecorder) CreateTripPosition(ctx, position any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateTripPosition", reflect.TypeOf((*MockRepository)(nil).CreateTripPosition), ctx, position)
+}
+
 // Get mocks base method.
 func (m *MockRepository) Get(ctx context.Context, id uuid.UUID) (*trip.Trip, error) {
 	m.ctrl.T.Helper()
@@ -123,6 +138,21 @@ func (m *MockRepository) GetForUpdate(ctx context.Context, id uuid.UUID) (*trip.
 func (mr *MockRepositoryMockRecorder) GetForUpdate(ctx, id any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetForUpdate", reflect.TypeOf((*MockRepository)(nil).GetForUpdate), ctx, id)
+}
+
+// ListTripPositions mocks base method.
+func (m *MockRepository) ListTripPositions(ctx context.Context, id uuid.UUID) ([]trip.Position, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListTripPositions", ctx, id)
+	ret0, _ := ret[0].([]trip.Position)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListTripPositions indicates an expected call of ListTripPositions.
+func (mr *MockRepositoryMockRecorder) ListTripPositions(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListTripPositions", reflect.TypeOf((*MockRepository)(nil).ListTripPositions), ctx, id)
 }
 
 // SaveStatusHistory mocks base method.
