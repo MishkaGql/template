@@ -17,161 +17,75 @@ var (
 	testDriverID = uuid.MustParse("8860b315-ec86-42eb-a17c-7c163d721ff5")
 )
 
-func TestNew(t *testing.T) {
+func TestNew_Success(t *testing.T) {
 	start, end := validCoordinates()
+	got := mustNewTrip(t, start, end)
 
+	want := &Trip{
+		UserID:     testUserID,
+		DriverID:   testDriverID,
+		Price:      1450,
+		Status:     StatusActive,
+		StartPoint: start,
+		EndPoint:   end,
+	}
+	if diff := cmp.Diff(want, got, cmpopts.IgnoreFields(Trip{}, "ID", "StartedAt")); diff != "" {
+		t.Errorf("New() mismatch (-want +got):\n%s", diff)
+	}
+	if got.ID == uuid.Nil || got.StartedAt.IsZero() {
+		t.Errorf("New() missing ID or start time: id=%v started_at=%v", got.ID, got.StartedAt)
+	}
+}
+
+func TestNew_InvalidRequest(t *testing.T) {
+	start, end := validCoordinates()
 	tests := []struct {
-		name     string
-		userID   uuid.UUID
-		driverID uuid.UUID
-		price    int64
-		wantErr  bool
+		name             string
+		userID, driverID uuid.UUID
+		price            int64
 	}{
-		{
-			name:     "Success",
-			userID:   testUserID,
-			driverID: testDriverID,
-			price:    1450,
-		},
-		{
-			name:     "InvalidRequest_EmptyUserID",
-			userID:   uuid.Nil,
-			driverID: testDriverID,
-			price:    1450,
-
-			wantErr: true,
-		},
-		{
-			name:     "InvalidRequest_EmptyDriverID",
-			userID:   testUserID,
-			driverID: uuid.Nil,
-			price:    1450,
-
-			wantErr: true,
-		},
-		{
-			name:     "InvalidRequest_NegativePrice",
-			userID:   testUserID,
-			driverID: testDriverID,
-			price:    -1,
-
-			wantErr: true,
-		},
+		{"empty user ID", uuid.Nil, testDriverID, 1450},
+		{"empty driver ID", testUserID, uuid.Nil, 1450},
+		{"negative price", testUserID, testDriverID, -1},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := New(tt.userID, tt.driverID, tt.price, start, end)
-
-			if tt.wantErr {
-				errstest.AssertCode(t, err, errs.InvalidRequest)
-				return
-			}
-
-			if err != nil {
-				t.Fatalf("New(%s, %s, %d, %v, %v): unexpected error: %v", tt.userID, tt.driverID, tt.price, start, end, err)
-			}
-
-			want := &Trip{
-				UserID:     tt.userID,
-				DriverID:   tt.driverID,
-				Price:      tt.price,
-				Status:     StatusActive,
-				StartPoint: start,
-				EndPoint:   end,
-			}
-
-			if diff := cmp.Diff(want, got, cmpopts.IgnoreFields(Trip{}, "ID", "StartedAt")); diff != "" {
-				t.Errorf("New(%s, %s, %d, %v, %v) mismatch (-want +got):\n%s", tt.userID, tt.driverID, tt.price, start, end, diff)
-			}
-
-			if got.ID == uuid.Nil {
-				t.Errorf("New() ID = %s, want non-zero UUID", got.ID)
-			}
-
-			if got.StartedAt.IsZero() {
-				t.Errorf("New() StartedAt = %v, want non-zero time", got.StartedAt)
-			}
+			_, err := New(tt.userID, tt.driverID, tt.price, start, end)
+			errstest.AssertCode(t, err, errs.InvalidRequest)
 		})
 	}
 }
 
-func TestNewCoordinates(t *testing.T) {
+func TestNewCoordinates_Success(t *testing.T) {
+	want := Coordinates{Latitude: 59.9398, Longitude: 30.3146}
+	got, err := NewCoordinates(want.Latitude, want.Longitude)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Errorf("NewCoordinates() = %+v, want %+v", got, want)
+	}
+}
+
+func TestNewCoordinates_InvalidRequest(t *testing.T) {
 	tests := []struct {
-		name      string
-		latitude  float64
-		longitude float64
-		wantErr   bool
+		name        string
+		coordinates Coordinates
 	}{
-		{
-			name:      "Success",
-			latitude:  59.9398,
-			longitude: 30.3146,
-		},
-		{
-			name:      "InvalidRequest_LatitudeAboveMax",
-			latitude:  90.1,
-			longitude: 0,
-
-			wantErr: true,
-		},
-		{
-			name:      "InvalidRequest_LatitudeBelowMin",
-			latitude:  -90.1,
-			longitude: 0,
-
-			wantErr: true,
-		},
-		{
-			name:      "InvalidRequest_LongitudeAboveMax",
-			latitude:  0,
-			longitude: 180.1,
-
-			wantErr: true,
-		},
-		{
-			name:      "InvalidRequest_LongitudeBelowMin",
-			latitude:  0,
-			longitude: -180.1,
-
-			wantErr: true,
-		},
-		{
-			name:     "InvalidRequest_NaNLatitude",
-			latitude: math.NaN(),
-
-			wantErr: true,
-		},
-		{
-			name:      "InvalidRequest_NaNLongitude",
-			longitude: math.NaN(),
-
-			wantErr: true,
-		},
+		{"latitude above 90", Coordinates{Latitude: 90.1}},
+		{"latitude below -90", Coordinates{Latitude: -90.1}},
+		{"longitude above 180", Coordinates{Longitude: 180.1}},
+		{"longitude below -180", Coordinates{Longitude: -180.1}},
+		{"NaN latitude", Coordinates{Latitude: math.NaN()}},
+		{"NaN longitude", Coordinates{Longitude: math.NaN()}},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := NewCoordinates(tt.latitude, tt.longitude)
-
-			if tt.wantErr {
-				errstest.AssertCode(t, err, errs.InvalidRequest)
-				return
-			}
-
-			if err != nil {
-				t.Fatalf("NewCoordinates(%v, %v): unexpected error: %v", tt.latitude, tt.longitude, err)
-			}
-
-			want := Coordinates{
-				Latitude:  tt.latitude,
-				Longitude: tt.longitude,
-			}
-
-			if diff := cmp.Diff(want, got); diff != "" {
-				t.Errorf("NewCoordinates(%v, %v) mismatch (-want +got):\n%s", tt.latitude, tt.longitude, diff)
-			}
+			_, err := NewCoordinates(tt.coordinates.Latitude, tt.coordinates.Longitude)
+			errstest.AssertCode(t, err, errs.InvalidRequest)
 		})
 	}
 }
@@ -183,16 +97,11 @@ func TestComplete(t *testing.T) {
 	if err := tr.Complete(); err != nil {
 		t.Fatalf("Complete(): unexpected error: %v", err)
 	}
-
-	if tr.FinishedAt == nil {
-		t.Fatal("Complete() FinishedAt = nil, want completion time")
+	if tr.Status != StatusCompleted || tr.FinishedAt == nil {
+		t.Fatalf("Complete() status=%q finished_at=%v, want a completed trip with a finish time", tr.Status, tr.FinishedAt)
 	}
 
-	finishedTr := mustNewTrip(t, start, end)
-	finishedTr.Status = StatusCompleted
-
-	err := finishedTr.Complete()
-
+	err := tr.Complete()
 	errstest.AssertCode(t, err, CodeTripAlreadyCompleted)
 }
 

@@ -12,8 +12,8 @@ func toInput(request api.TripData) applicationTrip.Input {
 		DriverID: request.DriverId,
 		Price:    request.Price,
 
-		StartPoint: applicationTrip.Coordinates(request.StartPoint),
-		EndPoint:   applicationTrip.Coordinates(request.EndPoint),
+		StartPoint: trip.Coordinates(request.StartPoint),
+		EndPoint:   trip.Coordinates(request.EndPoint),
 	}
 }
 
@@ -36,7 +36,7 @@ func toResponse(output *trip.Trip) api.Trip {
 
 func toPositionInput(request api.PositionData) applicationTrip.PositionInput {
 	return applicationTrip.PositionInput{
-		Coords:     applicationTrip.Coordinates(request.Coordinates),
+		Coords:     trip.Coordinates(request.Coordinates),
 		RecordedAt: request.RecordedAt,
 	}
 }

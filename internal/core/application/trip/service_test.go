@@ -23,8 +23,7 @@ var (
 func TestCreate_Success(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	ctx := t.Context()
-	txCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
+	tx, txCtx := expectTransaction(t, ctrl)
 
 	want := activeTrip()
 	repo := NewMockRepository(ctrl)
@@ -35,13 +34,6 @@ func TestCreate_Success(t *testing.T) {
 			TripID:   testTripID,
 			ToStatus: trip.StatusActive,
 		}).Return(nil),
-	)
-
-	tx := NewMockTxManager(ctrl)
-	tx.EXPECT().Do(ctx, gomock.Any()).DoAndReturn(
-		func(_ context.Context, fn func(context.Context) error) error {
-			return fn(txCtx)
-		},
 	)
 
 	metrics := &metricsRecorder{}
@@ -97,9 +89,9 @@ func TestGet_Success(t *testing.T) {
 
 	repo.EXPECT().Get(gomock.Any(), testTripID).Return(activeTrip(), nil)
 
-	svc := NewService(repo, NewMockTxManager(ctrl), testLogger(), testMetrics())
+	svc := NewService(repo, NewMockTxManager(ctrl), testLogger(), &metricsRecorder{})
 
-	out, err := svc.Get(context.Background(), testTripID)
+	out, err := svc.Get(t.Context(), testTripID)
 	if err != nil {
 		t.Fatalf("не ожидали ошибку: %v", err)
 	}
@@ -117,9 +109,9 @@ func TestGet_TripNotFound_UnknownTripID(t *testing.T) {
 		Get(gomock.Any(), testTripID).
 		Return(nil, errs.New(trip.CodeTripNotFound, "Trip was not found", nil))
 
-	svc := NewService(repo, NewMockTxManager(ctrl), testLogger(), testMetrics())
+	svc := NewService(repo, NewMockTxManager(ctrl), testLogger(), &metricsRecorder{})
 
-	_, err := svc.Get(context.Background(), testTripID)
+	_, err := svc.Get(t.Context(), testTripID)
 
 	errstest.AssertCode(t, err, trip.CodeTripNotFound)
 }
@@ -127,8 +119,7 @@ func TestGet_TripNotFound_UnknownTripID(t *testing.T) {
 func TestFinish_Success(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	ctx := t.Context()
-	txCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
+	tx, txCtx := expectTransaction(t, ctrl)
 
 	current := activeTrip()
 	from := trip.StatusActive
@@ -142,13 +133,6 @@ func TestFinish_Success(t *testing.T) {
 			FromStatus: &from,
 			ToStatus:   trip.StatusCompleted,
 		}).Return(nil),
-	)
-
-	tx := NewMockTxManager(ctrl)
-	tx.EXPECT().Do(ctx, gomock.Any()).DoAndReturn(
-		func(_ context.Context, fn func(context.Context) error) error {
-			return fn(txCtx)
-		},
 	)
 
 	metrics := &metricsRecorder{}
@@ -178,7 +162,8 @@ func TestFinish_InternalError_HistorySaveFailed(t *testing.T) {
 		Return(errs.NewInternal(errors.New("history unavailable")))
 
 	metrics := &metricsRecorder{}
-	svc := NewService(repo, txPassthrough(ctrl), testLogger(), metrics)
+	tx, _ := expectTransaction(t, ctrl)
+	svc := NewService(repo, tx, testLogger(), metrics)
 
 	_, err := svc.Finish(t.Context(), testTripID)
 
@@ -194,24 +179,6 @@ func validInput() Input {
 		UserID:   testUserID,
 		DriverID: testDriverID,
 		Price:    1450,
-		StartPoint: Coordinates{
-			Latitude:  59.9398,
-			Longitude: 30.3146,
-		},
-		EndPoint: Coordinates{
-			Latitude:  59.9290,
-			Longitude: 30.3626,
-		},
-	}
-}
-
-func activeTrip() *trip.Trip {
-	return &trip.Trip{
-		ID:       testTripID,
-		UserID:   testUserID,
-		DriverID: testDriverID,
-		Price:    1450,
-		Status:   trip.StatusActive,
 		StartPoint: trip.Coordinates{
 			Latitude:  59.9398,
 			Longitude: 30.3146,
@@ -223,6 +190,19 @@ func activeTrip() *trip.Trip {
 	}
 }
 
+func activeTrip() *trip.Trip {
+	input := validInput()
+	return &trip.Trip{
+		ID:         testTripID,
+		UserID:     input.UserID,
+		DriverID:   input.DriverID,
+		Price:      input.Price,
+		Status:     trip.StatusActive,
+		StartPoint: input.StartPoint,
+		EndPoint:   input.EndPoint,
+	}
+}
+
 func completedTrip() *trip.Trip {
 	t := activeTrip()
 
@@ -231,34 +211,26 @@ func completedTrip() *trip.Trip {
 	return t
 }
 
-func txPassthrough(ctrl *gomock.Controller) *MockTxManager {
-	tx := NewMockTxManager(ctrl)
-	tx.EXPECT().
-		Do(gomock.Any(), gomock.Any()).
-		DoAndReturn(func(ctx context.Context, fn func(context.Context) error) error {
-			return fn(ctx)
-		})
+func expectTransaction(t *testing.T, ctrl *gomock.Controller) (*MockTxManager, context.Context) {
+	t.Helper()
 
-	return tx
+	ctx := t.Context()
+	txCtx, cancel := context.WithCancel(ctx)
+	t.Cleanup(cancel)
+
+	tx := NewMockTxManager(ctrl)
+	tx.EXPECT().Do(ctx, gomock.Any()).DoAndReturn(func(_ context.Context, fn func(context.Context) error) error {
+		return fn(txCtx)
+	})
+	return tx, txCtx
 }
 
 func testLogger() *slog.Logger {
 	return slog.New(slog.DiscardHandler)
 }
 
-func testMetrics() BusinessMetrics {
-	return noopMetrics{}
-}
-
-type noopMetrics struct{}
-
-func (noopMetrics) TripCreated(context.Context)   {}
-func (noopMetrics) TripCompleted(context.Context) {}
-
-func (noopMetrics) PositionSaved(context.Context)      {}
-func (*metricsRecorder) PositionSaved(context.Context) {}
-
 type metricsRecorder struct{ created, completed int }
 
 func (m *metricsRecorder) TripCreated(context.Context)   { m.created++ }
 func (m *metricsRecorder) TripCompleted(context.Context) { m.completed++ }
+func (*metricsRecorder) PositionSaved(context.Context)   {}

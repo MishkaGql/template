@@ -61,9 +61,5 @@ func (e *Error) LogValue() slog.Value {
 }
 
 func AsError(err error) (*Error, bool) {
-	if absErr, ok := errors.AsType[*Error](err); ok {
-		return absErr, true
-	}
-
-	return nil, false
+	return errors.AsType[*Error](err)
 }

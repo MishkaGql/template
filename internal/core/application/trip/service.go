@@ -37,8 +37,8 @@ func (s *Service) Create(ctx context.Context, input Input) (*trip.Trip, error) {
 		input.UserID,
 		input.DriverID,
 		input.Price,
-		trip.Coordinates(input.StartPoint),
-		trip.Coordinates(input.EndPoint),
+		input.StartPoint,
+		input.EndPoint,
 	)
 	if err != nil {
 		return nil, err
@@ -114,7 +114,7 @@ func (s *Service) CreateTripPosition(ctx context.Context, id uuid.UUID, input Po
 			return err
 		}
 
-		position, err := t.AddPosition(trip.Coordinates(input.Coords), input.RecordedAt)
+		position, err := t.AddPosition(input.Coords, input.RecordedAt)
 		if err != nil {
 			return err
 		}
@@ -135,6 +135,5 @@ func (s *Service) ListTripPositions(ctx context.Context, id uuid.UUID) ([]trip.P
 		return nil, err
 	}
 
-	pos, err := s.repo.ListTripPositions(ctx, id)
-	return pos, err
+	return s.repo.ListTripPositions(ctx, id)
 }

@@ -30,17 +30,19 @@ type collectionTracer struct {
 }
 
 func newCollectionTracer(mp metric.MeterProvider) *collectionTracer {
+	const durationMetricName = "db.pushclient.operation.duration"
+
 	if mp == nil {
 		mp = noop.NewMeterProvider()
 	}
 
 	duration, err := mp.Meter(dbInstrumentationName).Float64Histogram(
-		"db.pushclient.operation.duration",
+		durationMetricName,
 		metric.WithUnit("s"),
 		metric.WithDescription("Длительность запроса в БД"),
 	)
 	if err != nil {
-		duration, _ = noop.NewMeterProvider().Meter(dbInstrumentationName).Float64Histogram("db.pushclient.operation.duration")
+		duration, _ = noop.NewMeterProvider().Meter(dbInstrumentationName).Float64Histogram(durationMetricName)
 	}
 
 	return &collectionTracer{

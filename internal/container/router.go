@@ -21,7 +21,7 @@ import (
 func NewRouter(h *trip.Handler, logger *slog.Logger, metrics middleware.ActiveRequests) (http.Handler, error) {
 	spec, err := openapi.Load()
 	if err != nil {
-		return nil, fmt.Errorf("load push-service.openapi.yaml spec: %w", err)
+		return nil, fmt.Errorf("load trip-service OpenAPI spec: %w", err)
 	}
 	spec.Servers = nil
 

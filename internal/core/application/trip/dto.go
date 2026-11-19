@@ -4,23 +4,20 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-)
 
-type Coordinates struct {
-	Latitude  float64
-	Longitude float64
-}
+	"github.com/MishkaGql/template/internal/core/domain/trip"
+)
 
 type Input struct {
 	UserID   uuid.UUID
 	DriverID uuid.UUID
 	Price    int64
 
-	StartPoint Coordinates
-	EndPoint   Coordinates
+	StartPoint trip.Coordinates
+	EndPoint   trip.Coordinates
 }
 
 type PositionInput struct {
-	Coords     Coordinates
+	Coords     trip.Coordinates
 	RecordedAt time.Time
 }

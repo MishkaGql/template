@@ -45,21 +45,10 @@ func TestCreateTrip_Success(t *testing.T) {
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("статус: got %d, want %d", rec.Code, http.StatusCreated)
 	}
-}
 
-func TestCreateTrip_Success_LocationHeader(t *testing.T) {
-	handler, service := newTestHandler(t)
-
-	service.EXPECT().Create(gomock.Any(), expectedInput()).Return(handlerOutput(), nil)
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/trips", strings.NewReader(validBody))
-
-	handler.CreateTrip(rec, req, api.CreateTripParams{})
-
-	location := rec.Header().Get("Location")
-	if !strings.HasSuffix(location, "/"+handlerTripID.String()) {
-		t.Errorf("Location: got %q, want суффикс %q", location, handlerTripID.String())
+	wantLocation := "/api/v1/trips/" + handlerTripID.String()
+	if got := rec.Header().Get("Location"); got != wantLocation {
+		t.Errorf("Location = %q, want %q", got, wantLocation)
 	}
 }
 
@@ -92,19 +81,30 @@ func TestCreateTrip_DriverBusy_BusyDriver(t *testing.T) {
 }
 
 func TestCreateTrip_InternalError_DetailNotExposed(t *testing.T) {
-	handler, service := newTestHandler(t)
+	cause := errors.New("insert failed: password=secret")
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{"internal error", errs.NewInternal(cause)},
+		{"unmapped code", errs.New("unknown_code", cause.Error(), nil)},
+		{"unexpected error", cause},
+	}
 
-	service.EXPECT().
-		Create(gomock.Any(), expectedInput()).
-		Return(nil, errs.NewInternal(errors.New("insert failed: password=secret")))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler, service := newTestHandler(t)
+			service.EXPECT().Create(gomock.Any(), expectedInput()).Return(nil, tt.err)
 
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/trips", strings.NewReader(validBody))
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/trips", strings.NewReader(validBody))
+			handler.CreateTrip(rec, req, api.CreateTripParams{})
 
-	handler.CreateTrip(rec, req, api.CreateTripParams{})
-
-	if strings.Contains(rec.Body.String(), "password=secret") {
-		t.Errorf("тело ответа раскрывает детали внутренней ошибки: %s", rec.Body.String())
+			assertProblem(t, rec, http.StatusInternalServerError, errs.InternalError)
+			if strings.Contains(rec.Body.String(), "password=secret") {
+				t.Errorf("response exposes internal cause: %s", rec.Body)
+			}
+		})
 	}
 }
 
@@ -198,11 +198,11 @@ func expectedInput() applicationTrip.Input {
 		UserID:   handlerUserID,
 		DriverID: handlerDriverID,
 		Price:    1450,
-		StartPoint: applicationTrip.Coordinates{
+		StartPoint: trip.Coordinates{
 			Latitude:  59.9398,
 			Longitude: 30.3146,
 		},
-		EndPoint: applicationTrip.Coordinates{
+		EndPoint: trip.Coordinates{
 			Latitude:  59.9290,
 			Longitude: 30.3626,
 		},
@@ -210,14 +210,15 @@ func expectedInput() applicationTrip.Input {
 }
 
 func handlerOutput() *trip.Trip {
+	input := expectedInput()
 	return &trip.Trip{
 		ID:         handlerTripID,
-		UserID:     handlerUserID,
-		DriverID:   handlerDriverID,
-		Price:      1450,
+		UserID:     input.UserID,
+		DriverID:   input.DriverID,
+		Price:      input.Price,
 		Status:     trip.StatusActive,
-		StartPoint: trip.Coordinates(expectedInput().StartPoint),
-		EndPoint:   trip.Coordinates(expectedInput().EndPoint),
+		StartPoint: input.StartPoint,
+		EndPoint:   input.EndPoint,
 	}
 }
 

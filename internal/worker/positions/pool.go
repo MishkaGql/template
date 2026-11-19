@@ -16,29 +16,46 @@ import (
 	"github.com/MishkaGql/template/internal/core/sharedkernel/tracelog"
 )
 
+const (
+	resultSkipped   = ""
+	resultQueued    = "queued"
+	resultDuplicate = "duplicate"
+	resultDropped   = "dropped"
+	resultSuccess   = "success"
+	resultError     = "error"
+)
+
 type job struct {
 	trip Trip
 	scan trace.SpanContext
 }
 
 type Pool struct {
-	cfg                config.PositionConfig
-	repo               Repository
-	push               Gateway
-	logger             *slog.Logger
-	metrics            instruments
-	queue              chan *job
+	cfg     config.PositionConfig
+	repo    Repository
+	push    Gateway
+	logger  *slog.Logger
+	metrics instruments
+
+	queue  chan *job
+	active atomic.Int64
+
 	mu                 sync.Mutex
 	pending            map[uuid.UUID]*job
 	receivedDuringScan map[uuid.UUID]bool
-	active             atomic.Int64
 
 	stopScan    context.CancelFunc
 	stopWorkers context.CancelFunc
 	done        chan struct{}
 }
 
-func New(cfg config.PositionConfig, repo Repository, push Gateway, logger *slog.Logger, meter metric.Meter) (*Pool, error) {
+func New(
+	cfg config.PositionConfig,
+	repo Repository,
+	push Gateway,
+	logger *slog.Logger,
+	meter metric.Meter,
+) (*Pool, error) {
 	p := &Pool{
 		cfg:     cfg,
 		repo:    repo,
@@ -48,9 +65,11 @@ func New(cfg config.PositionConfig, repo Repository, push Gateway, logger *slog.
 		pending: make(map[uuid.UUID]*job),
 		done:    make(chan struct{}),
 	}
+
 	if err := p.registerMetrics(meter); err != nil {
 		return nil, err
 	}
+
 	return p, nil
 }
 
@@ -66,30 +85,39 @@ func (p *Pool) start(ctx context.Context, ticks Ticker) {
 	var workers sync.WaitGroup
 	for range p.cfg.Workers {
 		workers.Go(func() {
-			for j := range p.queue {
-				p.process(workerCtx, j)
+			for task := range p.queue {
+				p.process(workerCtx, task)
 			}
 		})
 	}
+
 	go func() {
-		defer close(p.done)
-		for scanCtx.Err() == nil {
-			select {
-			case <-scanCtx.Done():
-			case <-ticks.Ticks():
-				p.scan(scanCtx)
-			}
-		}
-		ticks.Stop()
+		p.runScanner(scanCtx, ticks)
 		close(p.queue)
 		workers.Wait()
+
 		stopWorkers()
 		stopScan()
+		close(p.done)
 	}()
+}
+
+func (p *Pool) runScanner(ctx context.Context, ticks Ticker) {
+	defer ticks.Stop()
+
+	for ctx.Err() == nil {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticks.Ticks():
+			p.scan(ctx)
+		}
+	}
 }
 
 func (p *Pool) Stop(ctx context.Context) error {
 	p.stopScan()
+
 	select {
 	case <-p.done:
 		return ctx.Err()
@@ -103,6 +131,7 @@ func (p *Pool) Stop(ctx context.Context) error {
 func (p *Pool) Cancel(id uuid.UUID) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+
 	delete(p.pending, id)
 	if p.receivedDuringScan != nil {
 		p.receivedDuringScan[id] = true
@@ -116,6 +145,7 @@ func (p *Pool) scan(ctx context.Context) {
 	p.mu.Lock()
 	p.receivedDuringScan = make(map[uuid.UUID]bool)
 	p.mu.Unlock()
+
 	defer func() {
 		p.mu.Lock()
 		p.receivedDuringScan = nil
@@ -129,76 +159,100 @@ func (p *Pool) scan(ctx context.Context) {
 		}
 		return
 	}
-	for _, t := range trips {
+
+	for _, trip := range trips {
 		if ctx.Err() != nil {
 			return
 		}
-		result := p.enqueue(t, span.SpanContext())
-		if result == "" {
+
+		result := p.enqueue(trip, span.SpanContext())
+		if result == resultSkipped {
 			continue
 		}
+
 		p.metrics.checks.Add(ctx, 1, resultLabel(result))
-		if result == "dropped" {
+
+		if result == resultDropped {
 			p.metrics.requests.Add(ctx, 1, resultLabel(result))
-			tracelog.WithTrace(ctx, p.logger).Warn("position queue full", "trip_id", t.ID)
+			tracelog.WithTrace(ctx, p.logger).Warn("position queue full", "trip_id", trip.ID)
 		}
 	}
 }
 
-func (p *Pool) enqueue(t Trip, scan trace.SpanContext) string {
+func (p *Pool) enqueue(trip Trip, scan trace.SpanContext) string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.receivedDuringScan[t.ID] {
-		return ""
+
+	if p.receivedDuringScan[trip.ID] {
+		return resultSkipped
 	}
-	if p.pending[t.ID] != nil {
-		return "duplicate"
+
+	if p.pending[trip.ID] != nil {
+		return resultDuplicate
 	}
-	j := &job{trip: t, scan: scan}
+
+	task := &job{trip: trip, scan: scan}
+
 	select {
-	case p.queue <- j:
-		p.pending[t.ID] = j
-		return "queued"
+	case p.queue <- task:
+		p.pending[trip.ID] = task
+		return resultQueued
 	default:
-		return "dropped"
+		return resultDropped
 	}
 }
 
-func (p *Pool) process(ctx context.Context, j *job) {
-	id := j.trip.ID
+func (p *Pool) process(ctx context.Context, task *job) {
+	id := task.trip.ID
+
 	p.mu.Lock()
-	current := p.pending[id] == j
+	pending := p.pending[id] == task
 	p.mu.Unlock()
-	if !current {
+
+	if !pending {
 		return
 	}
+
 	defer func() {
 		p.mu.Lock()
-		if p.pending[id] == j {
+		if p.pending[id] == task {
 			delete(p.pending, id)
 		}
 		p.mu.Unlock()
 	}()
+
 	if ctx.Err() != nil {
-		p.metrics.requests.Add(ctx, 1, resultLabel("dropped"))
+		p.metrics.requests.Add(ctx, 1, resultLabel(resultDropped))
 		return
 	}
-	ctx, span := otel.Tracer("positions").Start(ctx, "positions.request", trace.WithNewRoot(), trace.WithLinks(trace.Link{SpanContext: j.scan}))
+
+	p.sendRequest(ctx, task)
+}
+
+func (p *Pool) sendRequest(ctx context.Context, task *job) {
+	ctx, span := otel.Tracer("positions").Start(ctx, "positions.request",
+		trace.WithNewRoot(),
+		trace.WithLinks(trace.Link{SpanContext: task.scan}),
+	)
 	defer span.End()
+
 	ctx, cancel := context.WithTimeout(ctx, p.cfg.RequestTimeout)
 	defer cancel()
 
 	p.active.Add(1)
 	defer p.active.Add(-1)
+
 	start := time.Now()
-	err := p.push.RequestPosition(ctx, id, j.trip.DriverID)
+	err := p.push.RequestPosition(ctx, task.trip.ID, task.trip.DriverID)
 	duration := time.Since(start).Seconds()
-	result := "success"
+
+	result := resultSuccess
 	if err != nil {
-		result = "error"
+		result = resultError
 		span.RecordError(err)
-		tracelog.WithTrace(ctx, p.logger).Warn("position request failed", "trip_id", id, "error", err)
+		tracelog.WithTrace(ctx, p.logger).Warn("position request failed", "trip_id", task.trip.ID, "error", err)
 	}
+
 	p.metrics.requests.Add(ctx, 1, resultLabel(result))
 	p.metrics.duration.Record(ctx, duration, resultLabel(result))
 }

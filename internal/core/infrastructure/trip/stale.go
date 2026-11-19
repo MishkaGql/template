@@ -11,9 +11,11 @@ import (
 )
 
 func (r *Repository) FindStale(ctx context.Context, age time.Duration) ([]positions.Trip, error) {
-	const query = `SELECT id, driver_id FROM trips
+	sql := `SELECT id, driver_id FROM trips
         WHERE status = 'active'
           AND COALESCE(last_position_at, started_at) < now() - @age::interval
         ORDER BY COALESCE(last_position_at, started_at), id`
-	return db.QueryMore[positions.Trip](ctx, r.pool, query, pgx.NamedArgs{"age": age}, r.queryTimeout)
+	args := pgx.NamedArgs{"age": age}
+
+	return db.QueryMore[positions.Trip](ctx, r.pool, sql, args, r.queryTimeout)
 }

@@ -4,4 +4,4 @@ generate:
   models: true
   client: true
 
-output: pushclient/client.gen.go
+output: api/pushclient/client.gen.go
